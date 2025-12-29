@@ -12,6 +12,7 @@ accelerate>=0.28.0
 safetensors>=0.4.0
 timm>=0.9.16
 scikit-image>=0.22.0
+kornia>=0.7.2
 # Shared pipeline interfaces
 -e ../pipeline-core
 # Local ai_kit (adjust the path if your repo lives elsewhere)
