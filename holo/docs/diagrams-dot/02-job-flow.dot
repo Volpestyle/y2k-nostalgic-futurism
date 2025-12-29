@@ -1,0 +1,30 @@
+digraph G {
+  rankdir=LR;
+  graph [bgcolor="transparent", pad=0.2];
+  node [shape=box, style="rounded,filled", fillcolor="#0f1220", fontcolor="white", color="#3a3f5c", fontname="Helvetica"];
+  edge [color="#a7b0d0", fontcolor="#a7b0d0", fontname="Helvetica"];
+
+  C [label="Client"];
+  API [label="Go API"];
+  S [shape=cylinder, label="Blob store"];
+  DB [shape=cylinder, label="Job store"];
+  W [label="Python worker"];
+
+  C -> API [label="POST /v1/jobs\n(image + BakeSpec)"];
+  API -> S [label="store input"];
+  API -> DB [label="create job (queued)"];
+  API -> C [label="201 {jobId}"];
+
+  C -> API [label="poll GET /v1/jobs/:id\n(or SSE)"];
+  API -> DB [label="read status"];
+  API -> C [label="{status, progress}"];
+
+  W -> DB [label="claim queued job"];
+  W -> S [label="download input"];
+  W -> W [label="cutout → views → depth\n→ fuse → mesh → decimate"];
+  W -> S [label="upload output"];
+  W -> DB [label="mark done + output_key"];
+
+  C -> API [label="GET /v1/jobs/:id/result"];
+  API -> C [label="stream/redirect output"];
+}

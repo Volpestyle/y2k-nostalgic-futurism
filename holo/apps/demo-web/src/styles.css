@@ -1,0 +1,104 @@
+.vizHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.vizBadge {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vizShell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.vizCanvasWrap {
+  position: relative;
+  border: 2px solid var(--ui-border-dark);
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.12), transparent 60%),
+    linear-gradient(180deg, #0c0c0c, #1b1b1b);
+  aspect-ratio: 16 / 9;
+  min-height: 320px;
+  max-height: 520px;
+  overflow: hidden;
+}
+
+.vizCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.vizOverlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 4px 8px;
+  border: 1px solid var(--ui-border-dark);
+  background: #f2efe6;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  animation: signalBlink 1.6s steps(2, end) infinite;
+}
+
+.vizControls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.controlRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.vizControls audio {
+  display: none;
+}
+
+.appHeaderControls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.appThemeToggle {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+@keyframes signalBlink {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0.6;
+  }
+}
+
+@media (max-width: 900px) {
+  .vizShell {
+    grid-template-columns: 1fr;
+  }
+
+  .vizCanvasWrap {
+    max-height: 420px;
+  }
+}

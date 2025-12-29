@@ -1,0 +1,40 @@
+digraph G {
+  rankdir=LR;
+  graph [bgcolor="transparent", pad=0.2];
+  node [shape=box, style="rounded,filled", fillcolor="#0f1220", fontcolor="white", color="#3a3f5c", fontname="Helvetica"];
+  edge [color="#a7b0d0", fontcolor="#a7b0d0", fontname="Helvetica"];
+
+  subgraph cluster_local {
+    label="Local Dev";
+    color="#3a3f5c";
+    style="rounded";
+    API_L [label="Go API"];
+    FS [shape=cylinder, label="Local FS"];
+    SQLITE [shape=cylinder, label="SQLite"];
+    POLL [shape=box3d, label="DB polling"];
+    PY_L [label="Python worker"];
+    API_L -> FS [label="BlobStore"];
+    API_L -> SQLITE [label="JobStore"];
+    API_L -> POLL [label="Queue"];
+    PY_L -> POLL [label="reads"];
+    PY_L -> FS [label="IO"];
+    PY_L -> SQLITE [label="state"];
+  }
+
+  subgraph cluster_cloud {
+    label="Cloud";
+    color="#3a3f5c";
+    style="rounded";
+    API_C [label="Go API"];
+    S3 [shape=cylinder, label="S3"];
+    DDB [shape=cylinder, label="DynamoDB"];
+    SQS [shape=box3d, label="SQS"];
+    GPU [label="GPU worker\n(Batch/SageMaker)"];
+    API_C -> S3 [label="BlobStore"];
+    API_C -> DDB [label="JobStore"];
+    API_C -> SQS [label="Queue"];
+    GPU -> SQS [label="reads"];
+    GPU -> S3 [label="IO"];
+    GPU -> DDB [label="state"];
+  }
+}

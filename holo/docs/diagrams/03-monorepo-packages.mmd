@@ -1,0 +1,26 @@
+flowchart TB
+  ROOT[holo-2d3d\n(pnpm workspace)]
+
+  subgraph apps
+    DEMO[apps/demo-web\nVite demo]
+  end
+
+  subgraph packages
+    SPEC[packages/shared-spec\nBakeSpec schema/types]
+    SDK[packages/sdk-js\nClient SDK]
+    VIEW[packages/viewer-three\nThree.js viewer]
+    API[packages/api-go\nGo API]
+    WRK[packages/worker-py\nPython worker]
+  end
+
+  ROOT --> apps
+  ROOT --> packages
+
+  SPEC --> SDK
+  SPEC --> API
+  SPEC --> WRK
+
+  SDK --> DEMO
+  VIEW --> DEMO
+
+  API <--> WRK

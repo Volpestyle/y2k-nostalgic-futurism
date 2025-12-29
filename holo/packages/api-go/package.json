@@ -1,0 +1,11 @@
+{
+  "name": "@holo/api-go",
+  "private": true,
+  "scripts": {
+    "dev": "go run ./cmd/api",
+    "build": "go build -o ./bin/api ./cmd/api",
+    "lint": "golangci-lint run || true",
+    "format": "gofmt -w .",
+    "typecheck": "echo 'Go has no typecheck step here'"
+  }
+}

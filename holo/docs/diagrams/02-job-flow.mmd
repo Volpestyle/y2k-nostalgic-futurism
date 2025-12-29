@@ -1,0 +1,27 @@
+sequenceDiagram
+  autonumber
+  participant C as Client (web/RN)
+  participant API as Go API
+  participant S as Blob store
+  participant DB as Job store
+  participant W as Python worker
+
+  C->>API: POST /v1/jobs (image + BakeSpec)
+  API->>S: Store input image
+  API->>DB: Create job (queued)
+  API-->>C: 201 {jobId}
+
+  loop poll or SSE
+    C->>API: GET /v1/jobs/:id
+    API->>DB: Read status
+    API-->>C: {status, progress}
+  end
+
+  W->>DB: Fetch queued job
+  W->>S: Download input
+  W->>W: Cutout → multiview → depth → fuse → mesh → decimate
+  W->>S: Upload output (GLB/GLTF)
+  W->>DB: Mark done + output location
+
+  C->>API: GET /v1/jobs/:id/result
+  API-->>C: Redirect/stream output

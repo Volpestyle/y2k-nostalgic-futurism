@@ -1,0 +1,46 @@
+flowchart LR
+  subgraph Clients
+    W[Web app]
+    R[RN app]
+    O[Other tool]
+  end
+
+  subgraph Packages
+    SDK[TS SDK\npackages/sdk-js]
+    VIEW[Three.js viewer\npackages/viewer-three]
+    SPEC[BakeSpec\npackages/shared-spec]
+  end
+
+  subgraph Service
+    API[Go API\npackages/api-go]
+  end
+
+  subgraph Data
+    B[(Blob store\n(local fs / S3))]
+    J[(Job store\n(SQLite / DynamoDB))]
+    Q[[Queue\n(polling / SQS)]]
+  end
+
+  subgraph Workers
+    WP[Python worker\npackages/worker-py]
+    MODELS[(Local models\n(seg + views + depth))]
+  end
+
+  W --> SDK --> API
+  R --> SDK
+  O --> SDK
+
+  SPEC --> SDK
+  SPEC --> API
+  SPEC --> WP
+
+  API --> B
+  API --> J
+  API --> Q
+
+  WP --> Q
+  WP --> B
+  WP --> J
+  WP --> MODELS
+
+  VIEW --> W

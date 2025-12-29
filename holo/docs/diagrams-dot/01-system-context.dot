@@ -1,0 +1,67 @@
+digraph G {
+  rankdir=LR;
+  graph [bgcolor="transparent", pad=0.2];
+  node [shape=box, style="rounded,filled", fillcolor="#0f1220", fontcolor="white", color="#3a3f5c", fontname="Helvetica"];
+  edge [color="#a7b0d0", fontcolor="#a7b0d0", fontname="Helvetica"];
+
+  subgraph cluster_clients {
+    label="Clients";
+    color="#3a3f5c";
+    style="rounded";
+    W [label="Web app"];
+    R [label="RN app"];
+    O [label="Other tool"];
+  }
+
+  subgraph cluster_packages {
+    label="Packages";
+    color="#3a3f5c";
+    style="rounded";
+    SDK [label="TS SDK\npackages/sdk-js"];
+    VIEW [label="Three.js viewer\npackages/viewer-three"];
+    SPEC [label="BakeSpec\npackages/shared-spec"];
+  }
+
+  subgraph cluster_service {
+    label="Service";
+    color="#3a3f5c";
+    style="rounded";
+    API [label="Go API\npackages/api-go"];
+  }
+
+  subgraph cluster_data {
+    label="Data";
+    color="#3a3f5c";
+    style="rounded";
+    B [shape=cylinder, label="Blob store\n(local fs / S3)"];
+    J [shape=cylinder, label="Job store\n(SQLite / DynamoDB)"];
+    Q [shape=box3d, label="Queue\n(polling / SQS)"];
+  }
+
+  subgraph cluster_workers {
+    label="Workers";
+    color="#3a3f5c";
+    style="rounded";
+    WP [label="Python worker\npackages/worker-py"];
+    MODELS [shape=cylinder, label="Local models\n(seg + views + depth)"];
+  }
+
+  W -> SDK -> API;
+  R -> SDK;
+  O -> SDK;
+
+  SPEC -> SDK;
+  SPEC -> API;
+  SPEC -> WP;
+
+  API -> B;
+  API -> J;
+  API -> Q;
+
+  WP -> Q;
+  WP -> B;
+  WP -> J;
+  WP -> MODELS;
+
+  VIEW -> W;
+}

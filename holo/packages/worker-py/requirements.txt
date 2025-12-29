@@ -1,0 +1,18 @@
+# Minimal scaffold dependencies (the real bake pipeline will add torch/diffusers/etc)
+Pillow>=10.0.0
+# Local model runners
+numpy>=1.24.0,<2
+open3d>=0.18.0
+trimesh>=4.0.0
+torch>=2.2.0
+torchvision>=0.17.0
+transformers>=4.40.0
+diffusers>=0.27.0
+accelerate>=0.28.0
+safetensors>=0.4.0
+timm>=0.9.16
+scikit-image>=0.22.0
+# Shared pipeline interfaces
+-e ../pipeline-core
+# Local inference_kit (adjust the path if your repo lives elsewhere)
+-e ../../../../inference-kit/packages/python

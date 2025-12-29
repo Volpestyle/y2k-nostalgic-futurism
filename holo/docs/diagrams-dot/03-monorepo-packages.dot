@@ -1,0 +1,40 @@
+digraph G {
+  rankdir=TB;
+  graph [bgcolor="transparent", pad=0.2];
+  node [shape=box, style="rounded,filled", fillcolor="#0f1220", fontcolor="white", color="#3a3f5c", fontname="Helvetica"];
+  edge [color="#a7b0d0", fontcolor="#a7b0d0", fontname="Helvetica"];
+
+  ROOT [label="holo-2d3d\n(pnpm workspace)"];
+
+  subgraph cluster_apps {
+    label="apps";
+    color="#3a3f5c";
+    style="rounded";
+    DEMO [label="apps/demo-web\nVite demo"];
+  }
+
+  subgraph cluster_packages {
+    label="packages";
+    color="#3a3f5c";
+    style="rounded";
+    SPEC [label="packages/shared-spec\nBakeSpec types/schema"];
+    SDK [label="packages/sdk-js\nClient SDK"];
+    VIEW [label="packages/viewer-three\nThree.js viewer"];
+    API [label="packages/api-go\nGo API"];
+    WRK [label="packages/worker-py\nPython worker"];
+  }
+
+  ROOT -> DEMO;
+  ROOT -> SPEC;
+  ROOT -> SDK;
+  ROOT -> VIEW;
+  ROOT -> API;
+  ROOT -> WRK;
+
+  SPEC -> SDK;
+  SPEC -> API;
+  SPEC -> WRK;
+  SDK -> DEMO;
+  VIEW -> DEMO;
+  API -> WRK [dir=both, label="job + blobs"];
+}

@@ -1,0 +1,30 @@
+flowchart LR
+  subgraph Local Dev
+    API_L[Go API]
+    FS[(Local FS)]
+    SQLITE[(SQLite)]
+    POLL[[DB polling]]
+    PY_L[Python worker]
+  end
+
+  subgraph Cloud
+    API_C[Go API]
+    S3[(S3)]
+    DDB[(DynamoDB)]
+    SQS[[SQS]]
+    GPU[GPU worker\n(Batch/SageMaker async)]
+  end
+
+  API_L -- BlobStore --> FS
+  API_L -- JobStore --> SQLITE
+  API_L -- Queue --> POLL
+  PY_L -- reads --> POLL
+  PY_L -- IO --> FS
+  PY_L -- state --> SQLITE
+
+  API_C -- BlobStore --> S3
+  API_C -- JobStore --> DDB
+  API_C -- Queue --> SQS
+  GPU -- reads --> SQS
+  GPU -- IO --> S3
+  GPU -- state --> DDB
