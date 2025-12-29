@@ -5,6 +5,7 @@ export const BakeSpecV0_1 = z.object({
 
   cutout: z
     .object({
+      provider: z.string().optional(),
       model: z.string().default("rmbg-1.4"),
       refine: z.enum(["none", "sam"]).default("none"),
       feather: z.number().int().min(0).max(50).default(3)
@@ -27,6 +28,7 @@ export const BakeSpecV0_1 = z.object({
 
   depth: z
     .object({
+      provider: z.string().optional(),
       model: z.string().default("depth-anything-v2-small"),
       res: z.number().int().min(128).max(1024).default(512)
     })
