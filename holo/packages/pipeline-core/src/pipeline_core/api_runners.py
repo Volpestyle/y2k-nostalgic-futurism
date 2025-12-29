@@ -31,18 +31,37 @@ def build_api_runners(
     base_runners: Mapping[StageName, StageRunner] | None = None,
 ) -> Dict[StageName, StageRunner]:
     _require_ai_kit()
-    runners = dict(base_runners or {})
-    runners[StageName.CUTOUT] = _ApiStageRunner(lambda req: _run_cutout_api(kit, req))
-    runners[StageName.VIEWS] = _ApiStageRunner(lambda req: _run_views_api(kit, req))
-    runners[StageName.DEPTH] = _ApiStageRunner(lambda req: _run_depth_api(kit, req))
+    base = dict(base_runners or {})
+    runners = dict(base)
+    runners[StageName.CUTOUT] = _ApiStageRunner(
+        lambda req: _run_cutout_api(kit, req),
+        fallback=base.get(StageName.CUTOUT),
+    )
+    runners[StageName.VIEWS] = _ApiStageRunner(
+        lambda req: _run_views_api(kit, req),
+        fallback=base.get(StageName.VIEWS),
+    )
+    runners[StageName.DEPTH] = _ApiStageRunner(
+        lambda req: _run_depth_api(kit, req),
+        fallback=base.get(StageName.DEPTH),
+    )
     return runners
 
 
 class _ApiStageRunner:
-    def __init__(self, handler: Callable[[StageRequest], StageResult]) -> None:
+    def __init__(
+        self,
+        handler: Callable[[StageRequest], StageResult],
+        *,
+        fallback: StageRunner | None = None,
+    ) -> None:
         self._handler = handler
+        self._fallback = fallback
 
     def run(self, request: StageRequest) -> StageResult:
+        if not _has_provider_model(request.config):
+            if self._fallback is not None:
+                return self._fallback.run(request)
         return self._handler(request)
 
 
@@ -155,6 +174,12 @@ def _require_provider_model(request: StageRequest) -> tuple[str, str]:
     if not provider or not model:
         raise ValueError("API runner requires 'provider' and 'model' in stage config")
     return provider, model
+
+
+def _has_provider_model(config: Mapping[str, object]) -> bool:
+    provider = str(config.get("provider") or "").strip()
+    model = str(config.get("model") or "").strip()
+    return bool(provider and model)
 
 
 def _request_input_image(artifact: Artifact) -> ImageInput:
