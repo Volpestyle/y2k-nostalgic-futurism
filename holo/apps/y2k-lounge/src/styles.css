@@ -393,6 +393,91 @@ body[data-theme="light"] .loungeNavItem.isActive {
   gap: 16px;
 }
 
+.hudPipelineGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.hudPipelineStage {
+  border: 1px solid var(--lounge-hud-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(12, 18, 28, 0.96), rgba(10, 15, 24, 0.88));
+  box-shadow: inset 0 0 18px rgba(71, 247, 212, 0.08);
+}
+
+body[data-theme="light"] .hudPipelineStage {
+  background: linear-gradient(135deg, rgba(248, 248, 244, 0.95), rgba(235, 236, 230, 0.96));
+}
+
+.hudPipelineHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.hudPipelineTitle {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--lounge-accent-strong);
+}
+
+.hudPipelineMeta {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--lounge-sidebar-muted);
+  margin-top: 4px;
+}
+
+.hudSourceToggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--lounge-edge);
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(6, 10, 16, 0.55);
+  box-shadow: inset 0 0 12px rgba(71, 247, 212, 0.08);
+}
+
+body[data-theme="light"] .hudSourceToggle {
+  background: rgba(230, 234, 240, 0.6);
+}
+
+.hudSourceButton {
+  border: none;
+  background: transparent;
+  color: var(--lounge-sidebar-muted);
+  padding: 4px 10px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.hudSourceButton + .hudSourceButton {
+  border-left: 1px solid var(--lounge-edge);
+}
+
+.hudSourceButton[data-active="true"] {
+  color: var(--lounge-ink);
+  background: linear-gradient(180deg, rgba(71, 247, 212, 0.3), rgba(71, 247, 212, 0.08));
+}
+
+body[data-theme="light"] .hudSourceButton[data-active="true"] {
+  background: linear-gradient(180deg, rgba(47, 141, 228, 0.25), rgba(47, 141, 228, 0.08));
+}
+
+.hudSourceButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .hudControlRow {
   display: flex;
   flex-wrap: wrap;
@@ -431,6 +516,101 @@ body[data-theme="light"] .loungeNavItem.isActive {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.hudArtifactFrame {
+  border: 1px solid var(--lounge-viewer-border);
+  background: linear-gradient(180deg, var(--lounge-viewer-bg), var(--lounge-viewer-bg-alt));
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: inset 0 0 24px rgba(71, 247, 212, 0.08);
+}
+
+.hudArtifactFrame img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+}
+
+.hudCutoutFrame {
+  background-image:
+    linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.08) 25%,
+      transparent 25%,
+      transparent 75%,
+      rgba(255, 255, 255, 0.08) 75%,
+      rgba(255, 255, 255, 0.08)
+    ),
+    linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.08) 25%,
+      transparent 25%,
+      transparent 75%,
+      rgba(255, 255, 255, 0.08) 75%,
+      rgba(255, 255, 255, 0.08)
+    );
+  background-position: 0 0, 8px 8px;
+  background-size: 16px 16px;
+}
+
+.hudArtifactGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+}
+
+.hudArtifactCard {
+  border: 1px solid var(--lounge-viewer-border);
+  background: rgba(8, 12, 18, 0.45);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: inset 0 0 18px rgba(71, 247, 212, 0.06);
+}
+
+body[data-theme="light"] .hudArtifactCard {
+  background: rgba(230, 235, 242, 0.8);
+}
+
+.hudArtifactThumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+.hudArtifactPlaceholder {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lounge-sidebar-muted);
+  background: rgba(6, 10, 16, 0.6);
+}
+
+body[data-theme="light"] .hudArtifactPlaceholder {
+  background: rgba(210, 218, 228, 0.8);
+}
+
+.hudArtifactLabel {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--lounge-sidebar-muted);
+}
+
+.hudDepthThumb {
+  filter: contrast(1.1) brightness(1.05);
 }
 
 .hudSlider .ui-range {
