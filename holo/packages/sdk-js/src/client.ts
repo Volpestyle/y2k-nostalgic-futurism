@@ -33,17 +33,11 @@ export type ModelMetadata = {
   inPreview?: boolean;
 };
 
-export type PipelineModels = {
-  cutout: string[];
-  depth: string[];
-};
-
 export interface HoloClient {
   createJob(args: { image: File | Blob; bakeSpec?: BakeSpec | unknown }): Promise<CreateJobResponse>;
   getJob(jobId: string): Promise<JobStatusResponse>;
   getResultUrl(jobId: string): string;
   listProviderModels(args?: { providers?: string[]; refresh?: boolean }): Promise<ModelMetadata[]>;
-  listPipelineModels(): Promise<PipelineModels>;
 }
 
 export function createHoloClient(baseUrl: string): HoloClient {
@@ -86,10 +80,5 @@ export function createHoloClient(baseUrl: string): HoloClient {
       return (await res.json()) as ModelMetadata[];
     },
 
-    async listPipelineModels() {
-      const res = await fetch(`${root}/v1/bake/models`);
-      if (!res.ok) throw new Error(`listPipelineModels failed: ${res.status} ${await res.text()}`);
-      return (await res.json()) as PipelineModels;
-    },
   };
 }

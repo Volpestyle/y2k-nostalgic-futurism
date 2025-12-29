@@ -51,10 +51,6 @@ func main() {
 		Jobs:    jobStore,
 		BaseURL: baseURL,
 		AIKit:   kit,
-		PipelineModels: httpapi.PipelineModels{
-			Cutout: cfg.CutoutModels,
-			Depth:  cfg.DepthModels,
-		},
 	}
 
 	log.Printf("API listening on %s (baseURL=%s)", cfg.Addr, baseURL)

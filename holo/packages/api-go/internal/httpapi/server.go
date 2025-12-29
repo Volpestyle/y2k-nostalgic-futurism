@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -24,12 +25,6 @@ type Server struct {
 	Jobs    *store.SQLite
 	BaseURL string // optional, for generating absolute result URLs
 	AIKit   *aikit.Kit
-	PipelineModels PipelineModels
-}
-
-type PipelineModels struct {
-	Cutout []string `json:"cutout"`
-	Depth  []string `json:"depth"`
 }
 
 func (s Server) Router() http.Handler {
@@ -49,9 +44,7 @@ func (s Server) Router() http.Handler {
 		r.Post("/jobs", s.handleCreateJob)
 		r.Get("/jobs/{id}", s.handleGetJob)
 		r.Get("/jobs/{id}/result", s.handleGetResult)
-		r.Route("/bake", func(r chi.Router) {
-			r.Get("/models", s.handleBakeModels)
-		})
+		r.Get("/jobs/{id}/artifacts/*", s.handleGetArtifact)
 		r.Route("/ai", func(r chi.Router) {
 			r.Get("/provider-models", s.handleProviderModels)
 			r.Post("/generate", s.handleGenerate)
@@ -188,8 +181,49 @@ func (s Server) handleGetResult(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
-func (s Server) handleBakeModels(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.PipelineModels)
+func (s Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	raw := strings.TrimPrefix(chi.URLParam(r, "*"), "/")
+	if raw == "" || raw == "." {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("missing artifact path"))
+		return
+	}
+	clean := filepath.Clean(raw)
+	if clean == "." || strings.HasPrefix(clean, "..") || strings.Contains(clean, string(filepath.Separator)+"..") {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid artifact path"))
+		return
+	}
+
+	relPath := filepath.Join("jobs", id, "work", clean)
+	if !s.Blobs.Exists(relPath) {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("artifact not found"))
+		return
+	}
+	f, err := s.Blobs.Open(relPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	contentType := http.DetectContentType(buf[:n])
+	if ext := filepath.Ext(clean); ext != "" {
+		if mimeType := mime.TypeByExtension(ext); mimeType != "" {
+			if contentType == "application/octet-stream" || strings.HasPrefix(contentType, "text/plain") {
+				contentType = mimeType
+			}
+		}
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.Copy(w, f)
 }
 
 func (s Server) handleProviderModels(w http.ResponseWriter, r *http.Request) {
