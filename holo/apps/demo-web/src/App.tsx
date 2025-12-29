@@ -30,6 +30,7 @@ import { VisualizerPanel } from "./VisualizerPanel";
 const client = createHoloClient(import.meta.env.VITE_API_BASE_URL || "http://localhost:8080");
 const defaultCaptionPrompt =
   "Describe the subject and materials in this image for 3D reconstruction. Keep it brief.";
+type PipelineSource = "local" | "api";
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -45,9 +46,18 @@ export function App() {
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
 
+  const [cutoutSource, setCutoutSource] = useState<PipelineSource>("local");
   const [cutoutModel, setCutoutModel] = useState("rmbg-1.4");
+  const [cutoutProvider, setCutoutProvider] = useState("openai");
+  const [cutoutApiModel, setCutoutApiModel] = useState("");
+  const [depthSource, setDepthSource] = useState<PipelineSource>("local");
   const [depthModel, setDepthModel] = useState("depth-anything-v2-small");
-  const [viewsModel, setViewsModel] = useState("zero123-plus");
+  const [depthProvider, setDepthProvider] = useState("openai");
+  const [depthApiModel, setDepthApiModel] = useState("");
+  const [viewsSource, setViewsSource] = useState<PipelineSource>("local");
+  const [viewsModel, setViewsModel] = useState("stable-zero123");
+  const [viewsProvider, setViewsProvider] = useState("openai");
+  const [viewsApiModel, setViewsApiModel] = useState("");
   const [viewsCount, setViewsCount] = useState(8);
   const [captionEnabled, setCaptionEnabled] = useState(false);
   const [captionProvider, setCaptionProvider] = useState("openai");
@@ -117,9 +127,24 @@ export function App() {
   const providerOptions = useMemo(() => {
     return Array.from(new Set(visionModels.map((model) => model.provider))).sort();
   }, [visionModels]);
+  const cutoutProviderModels = useMemo(() => {
+    return visionModels.filter((model) => model.provider === cutoutProvider);
+  }, [visionModels, cutoutProvider]);
+  const depthProviderModels = useMemo(() => {
+    return visionModels.filter((model) => model.provider === depthProvider);
+  }, [visionModels, depthProvider]);
+  const viewsProviderModels = useMemo(() => {
+    return visionModels.filter((model) => model.provider === viewsProvider);
+  }, [visionModels, viewsProvider]);
   const providerModels = useMemo(() => {
     return visionModels.filter((model) => model.provider === captionProvider);
   }, [visionModels, captionProvider]);
+  const cutoutProviderValue = providerOptions.length > 0 ? cutoutProvider : "";
+  const cutoutApiModelValue = cutoutProviderModels.length > 0 ? cutoutApiModel : "";
+  const depthProviderValue = providerOptions.length > 0 ? depthProvider : "";
+  const depthApiModelValue = depthProviderModels.length > 0 ? depthApiModel : "";
+  const viewsProviderValue = providerOptions.length > 0 ? viewsProvider : "";
+  const viewsApiModelValue = viewsProviderModels.length > 0 ? viewsApiModel : "";
   const captionProviderValue = providerOptions.length > 0 ? captionProvider : "";
   const captionModelValue = providerModels.length > 0 ? captionModel : "";
   const viewsModelValue = viewsOptions.length > 0 ? viewsModel : "";
@@ -130,6 +155,27 @@ export function App() {
       setCaptionProvider(visionModels[0].provider);
     }
   }, [visionModels, captionProvider]);
+
+  useEffect(() => {
+    if (!visionModels.length) return;
+    if (!visionModels.some((model) => model.provider === cutoutProvider)) {
+      setCutoutProvider(visionModels[0].provider);
+    }
+  }, [visionModels, cutoutProvider]);
+
+  useEffect(() => {
+    if (!visionModels.length) return;
+    if (!visionModels.some((model) => model.provider === depthProvider)) {
+      setDepthProvider(visionModels[0].provider);
+    }
+  }, [visionModels, depthProvider]);
+
+  useEffect(() => {
+    if (!visionModels.length) return;
+    if (!visionModels.some((model) => model.provider === viewsProvider)) {
+      setViewsProvider(visionModels[0].provider);
+    }
+  }, [visionModels, viewsProvider]);
 
   useEffect(() => {
     if (!cutoutOptions.length) return;
@@ -153,6 +199,27 @@ export function App() {
   }, [viewsOptions, viewsModel]);
 
   useEffect(() => {
+    if (!cutoutProviderModels.length) return;
+    if (!cutoutProviderModels.some((model) => model.id === cutoutApiModel)) {
+      setCutoutApiModel(cutoutProviderModels[0].id);
+    }
+  }, [cutoutProviderModels, cutoutApiModel]);
+
+  useEffect(() => {
+    if (!depthProviderModels.length) return;
+    if (!depthProviderModels.some((model) => model.id === depthApiModel)) {
+      setDepthApiModel(depthProviderModels[0].id);
+    }
+  }, [depthProviderModels, depthApiModel]);
+
+  useEffect(() => {
+    if (!viewsProviderModels.length) return;
+    if (!viewsProviderModels.some((model) => model.id === viewsApiModel)) {
+      setViewsApiModel(viewsProviderModels[0].id);
+    }
+  }, [viewsProviderModels, viewsApiModel]);
+
+  useEffect(() => {
     if (!providerModels.length) return;
     if (!providerModels.some((model) => model.id === captionModel)) {
       setCaptionModel(providerModels[0].id);
@@ -163,15 +230,28 @@ export function App() {
     setError(null);
     if (!file) return;
 
+    const useCutoutApi = cutoutSource === "api" && cutoutProviderValue && cutoutApiModelValue;
+    const useDepthApi = depthSource === "api" && depthProviderValue && depthApiModelValue;
+    const useViewsApi = viewsSource === "api" && viewsProviderValue && viewsApiModelValue;
+
+    const cutoutConfig = useCutoutApi
+      ? { provider: cutoutProviderValue, model: cutoutApiModelValue }
+      : { model: cutoutModel };
+    const depthConfig = useDepthApi
+      ? { provider: depthProviderValue, model: depthApiModelValue }
+      : { model: depthModel };
     const viewsConfig: Record<string, unknown> = { count: viewsCount };
-    if (viewsModelValue) {
+    if (useViewsApi) {
+      viewsConfig.provider = viewsProviderValue;
+      viewsConfig.model = viewsApiModelValue;
+    } else if (viewsModelValue) {
       viewsConfig.model = viewsModelValue;
     }
 
     const bakeSpec = BakeSpecSchema.parse({
       version: "0.1.0",
-      cutout: { model: cutoutModel },
-      depth: { model: depthModel },
+      cutout: cutoutConfig,
+      depth: depthConfig,
       views: viewsConfig,
       mesh: { targetTris: 2000 },
       ai: {
@@ -259,59 +339,209 @@ export function App() {
               <Group>
                 <GroupTitle>Pipeline models</GroupTitle>
                 <Label>
-                  Cutout model
-                  <Select
-                    value={cutoutOptions.length > 0 ? cutoutModel : ""}
-                    onChange={(e) => setCutoutModel(e.target.value)}
-                    disabled={cutoutOptions.length === 0}
-                  >
-                    {cutoutOptions.length === 0 ? (
-                      <option value="">No cutout models available</option>
-                    ) : (
-                      cutoutOptions.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.displayName || model.id}
-                        </option>
-                      ))
-                    )}
+                  Cutout source
+                  <Select value={cutoutSource} onChange={(e) => setCutoutSource(e.target.value as PipelineSource)}>
+                    <option value="local">Local</option>
+                    <option value="api" disabled={providerOptions.length === 0}>
+                      API
+                    </option>
                   </Select>
                 </Label>
+                {cutoutSource === "local" ? (
+                  <Label>
+                    Cutout model
+                    <Select
+                      value={cutoutOptions.length > 0 ? cutoutModel : ""}
+                      onChange={(e) => setCutoutModel(e.target.value)}
+                      disabled={cutoutOptions.length === 0}
+                    >
+                      {cutoutOptions.length === 0 ? (
+                        <option value="">No cutout models available</option>
+                      ) : (
+                        cutoutOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.displayName || model.id}
+                          </option>
+                        ))
+                      )}
+                    </Select>
+                  </Label>
+                ) : (
+                  <FieldRow>
+                    <Label>
+                      Cutout provider
+                      <Select
+                        value={cutoutProviderValue}
+                        onChange={(e) => setCutoutProvider(e.target.value)}
+                        disabled={providerOptions.length === 0}
+                      >
+                        {providerOptions.length === 0 ? (
+                          <option value="">No providers available</option>
+                        ) : (
+                          providerOptions.map((provider) => (
+                            <option key={provider} value={provider}>
+                              {provider}
+                            </option>
+                          ))
+                        )}
+                      </Select>
+                    </Label>
+                    <Label>
+                      Cutout model
+                      <Select
+                        value={cutoutApiModelValue}
+                        onChange={(e) => setCutoutApiModel(e.target.value)}
+                        disabled={cutoutProviderModels.length === 0}
+                      >
+                        {cutoutProviderModels.length === 0 ? (
+                          <option value="">No models available</option>
+                        ) : (
+                          cutoutProviderModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.displayName || model.id}
+                            </option>
+                          ))
+                        )}
+                      </Select>
+                    </Label>
+                  </FieldRow>
+                )}
                 <Label>
-                  Depth model
-                  <Select
-                    value={depthOptions.length > 0 ? depthModel : ""}
-                    onChange={(e) => setDepthModel(e.target.value)}
-                    disabled={depthOptions.length === 0}
-                  >
-                    {depthOptions.length === 0 ? (
-                      <option value="">No depth models available</option>
-                    ) : (
-                      depthOptions.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.displayName || model.id}
-                        </option>
-                      ))
-                    )}
+                  Depth source
+                  <Select value={depthSource} onChange={(e) => setDepthSource(e.target.value as PipelineSource)}>
+                    <option value="local">Local</option>
+                    <option value="api" disabled={providerOptions.length === 0}>
+                      API
+                    </option>
                   </Select>
                 </Label>
+                {depthSource === "local" ? (
+                  <Label>
+                    Depth model
+                    <Select
+                      value={depthOptions.length > 0 ? depthModel : ""}
+                      onChange={(e) => setDepthModel(e.target.value)}
+                      disabled={depthOptions.length === 0}
+                    >
+                      {depthOptions.length === 0 ? (
+                        <option value="">No depth models available</option>
+                      ) : (
+                        depthOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.displayName || model.id}
+                          </option>
+                        ))
+                      )}
+                    </Select>
+                  </Label>
+                ) : (
+                  <FieldRow>
+                    <Label>
+                      Depth provider
+                      <Select
+                        value={depthProviderValue}
+                        onChange={(e) => setDepthProvider(e.target.value)}
+                        disabled={providerOptions.length === 0}
+                      >
+                        {providerOptions.length === 0 ? (
+                          <option value="">No providers available</option>
+                        ) : (
+                          providerOptions.map((provider) => (
+                            <option key={provider} value={provider}>
+                              {provider}
+                            </option>
+                          ))
+                        )}
+                      </Select>
+                    </Label>
+                    <Label>
+                      Depth model
+                      <Select
+                        value={depthApiModelValue}
+                        onChange={(e) => setDepthApiModel(e.target.value)}
+                        disabled={depthProviderModels.length === 0}
+                      >
+                        {depthProviderModels.length === 0 ? (
+                          <option value="">No models available</option>
+                        ) : (
+                          depthProviderModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.displayName || model.id}
+                            </option>
+                          ))
+                        )}
+                      </Select>
+                    </Label>
+                  </FieldRow>
+                )}
                 <Label>
-                  View model
-                  <Select
-                    value={viewsModelValue}
-                    onChange={(e) => setViewsModel(e.target.value)}
-                    disabled={viewsOptions.length === 0}
-                  >
-                    {viewsOptions.length === 0 ? (
-                      <option value="">No view models available</option>
-                    ) : (
-                      viewsOptions.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.displayName || model.id}
-                        </option>
-                      ))
-                    )}
+                  View source
+                  <Select value={viewsSource} onChange={(e) => setViewsSource(e.target.value as PipelineSource)}>
+                    <option value="local">Local</option>
+                    <option value="api" disabled={providerOptions.length === 0}>
+                      API
+                    </option>
                   </Select>
                 </Label>
+                {viewsSource === "local" ? (
+                  <Label>
+                    View model
+                    <Select
+                      value={viewsModelValue}
+                      onChange={(e) => setViewsModel(e.target.value)}
+                      disabled={viewsOptions.length === 0}
+                    >
+                      {viewsOptions.length === 0 ? (
+                        <option value="">No view models available</option>
+                      ) : (
+                        viewsOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.displayName || model.id}
+                          </option>
+                        ))
+                      )}
+                    </Select>
+                  </Label>
+                ) : (
+                  <FieldRow>
+                    <Label>
+                      View provider
+                      <Select
+                        value={viewsProviderValue}
+                        onChange={(e) => setViewsProvider(e.target.value)}
+                        disabled={providerOptions.length === 0}
+                      >
+                        {providerOptions.length === 0 ? (
+                          <option value="">No providers available</option>
+                        ) : (
+                          providerOptions.map((provider) => (
+                            <option key={provider} value={provider}>
+                              {provider}
+                            </option>
+                          ))
+                        )}
+                      </Select>
+                    </Label>
+                    <Label>
+                      View model
+                      <Select
+                        value={viewsApiModelValue}
+                        onChange={(e) => setViewsApiModel(e.target.value)}
+                        disabled={viewsProviderModels.length === 0}
+                      >
+                        {viewsProviderModels.length === 0 ? (
+                          <option value="">No models available</option>
+                        ) : (
+                          viewsProviderModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.displayName || model.id}
+                            </option>
+                          ))
+                        )}
+                      </Select>
+                    </Label>
+                  </FieldRow>
+                )}
                 <Label>
                   View count: {viewsCount}
                   <Input
@@ -323,12 +553,15 @@ export function App() {
                     onChange={(e) => setViewsCount(Number(e.target.value))}
                   />
                 </Label>
-                {modelsError && <Hint>Catalog model list error: {modelsError}</Hint>}
+                {modelsError && <Hint>Model list error: {modelsError}</Hint>}
                 {modelsLoaded &&
                   !modelsError &&
                   cutoutOptions.length === 0 &&
                   depthOptions.length === 0 && (
-                  <Hint>No pipeline models available from ai-kit.</Hint>
+                  <Hint>No local pipeline models available from ai-kit catalog.</Hint>
+                )}
+                {modelsLoaded && !modelsError && providerOptions.length === 0 && (
+                  <Hint>No API image models available from ai-kit providers.</Hint>
                 )}
               </Group>
 
