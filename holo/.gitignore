@@ -18,3 +18,7 @@ bin/
 
 # Local job data
 local-data/
+
+# Env files
+.env
+.env.local
