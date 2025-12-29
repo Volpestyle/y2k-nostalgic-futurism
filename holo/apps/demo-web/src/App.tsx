@@ -328,12 +328,12 @@ export function App() {
                   !modelsError &&
                   cutoutOptions.length === 0 &&
                   depthOptions.length === 0 && (
-                  <Hint>No pipeline models available from inference-kit.</Hint>
+                  <Hint>No pipeline models available from ai-kit.</Hint>
                 )}
               </Group>
 
               <Group>
-                <GroupTitle>AI caption (inference-kit)</GroupTitle>
+                <GroupTitle>AI caption (ai-kit)</GroupTitle>
                 <Label className="ui-toggle">
                   <Checkbox
                     checked={captionEnabled}
@@ -390,7 +390,7 @@ export function App() {
                 </Label>
                 {modelsError && <Hint>Model list error: {modelsError}</Hint>}
                 {!modelsError && providerOptions.length === 0 && (
-                  <Hint>No vision-capable models available from inference-kit.</Hint>
+                  <Hint>No vision-capable models available from ai-kit.</Hint>
                 )}
               </Group>
               <Button disabled={!file} onClick={startBake}>

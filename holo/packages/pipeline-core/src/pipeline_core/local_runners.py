@@ -16,8 +16,8 @@ from PIL import Image
 from .types import StageName, StageRequest, StageResult, StageRunner
 
 try:
-    from inference_kit.local import REGISTRY as _LOCAL_REGISTRY
-    from inference_kit.local import apply_mask_to_rgba, get_pipeline, load_rgb
+    from ai_kit.local import REGISTRY as _LOCAL_REGISTRY
+    from ai_kit.local import apply_mask_to_rgba, get_pipeline, load_rgb
 except ImportError as exc:  # pragma: no cover - handled at runtime
     _LOCAL_REGISTRY = None
     _LOCAL_IMPORT_ERROR: Exception | None = exc
@@ -496,8 +496,8 @@ def _run_export_local(request: StageRequest) -> StageResult:
 def _require_local_models() -> None:
     if _LOCAL_REGISTRY is None:
         raise RuntimeError(
-            "inference_kit is required for local runners. Install from the local repo: "
-            "pip install -e ../../../../inference-kit/packages/python"
+            "ai_kit is required for local runners. Install from the local repo: "
+            "pip install -e ../../../../ai-kit/packages/python"
         ) from _LOCAL_IMPORT_ERROR
 
 

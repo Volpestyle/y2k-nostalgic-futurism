@@ -5,11 +5,11 @@ from functools import lru_cache
 from typing import Optional
 
 try:
-    from inference_kit import Hub, HubConfig
-    from inference_kit.providers import AnthropicConfig, GeminiConfig, OpenAIConfig, XAIConfig
+    from ai_kit import Kit, KitConfig
+    from ai_kit.providers import AnthropicConfig, GeminiConfig, OpenAIConfig, XAIConfig
 except ImportError as exc:  # pragma: no cover - handled at runtime
-    Hub = None
-    HubConfig = None
+    Kit = None
+    KitConfig = None
     AnthropicConfig = None
     GeminiConfig = None
     OpenAIConfig = None
@@ -39,21 +39,21 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 @lru_cache(maxsize=1)
-def get_hub() -> Optional[Hub]:
-    if Hub is None or HubConfig is None:
+def get_kit() -> Optional[Kit]:
+    if Kit is None or KitConfig is None:
         raise RuntimeError(
-            "inference_kit is not installed. Install from the local repo: "
-            "pip install -e ../../../../inference-kit/packages/python"
+            "ai_kit is not installed. Install from the local repo: "
+            "pip install -e ../../../../ai-kit/packages/python"
         ) from _IMPORT_ERROR
 
     providers = {}
 
     openai_key = _env_first(
-        "INFERENCE_KIT_OPENAI_API_KEY",
+        "AI_KIT_OPENAI_API_KEY",
         "OPENAI_API_KEY",
     )
     openai_keys = _split_csv(
-        os.getenv("INFERENCE_KIT_OPENAI_API_KEYS", "")
+        os.getenv("AI_KIT_OPENAI_API_KEYS", "")
     )
     if openai_key or openai_keys:
         cfg = OpenAIConfig(
@@ -61,27 +61,27 @@ def get_hub() -> Optional[Hub]:
             api_keys=openai_keys or None,
         )
         base_url = (
-            os.getenv("INFERENCE_KIT_OPENAI_BASE_URL", "")
+            os.getenv("AI_KIT_OPENAI_BASE_URL", "")
         ).strip()
         if base_url:
             cfg.base_url = base_url
         org = (
-            os.getenv("INFERENCE_KIT_OPENAI_ORG", "")
+            os.getenv("AI_KIT_OPENAI_ORG", "")
         ).strip()
         if org:
             cfg.organization = org
         cfg.default_use_responses = _env_bool(
-            "INFERENCE_KIT_OPENAI_USE_RESPONSES",
+            "AI_KIT_OPENAI_USE_RESPONSES",
             True,
         )
         providers["openai"] = cfg
 
     anthropic_key = _env_first(
-        "INFERENCE_KIT_ANTHROPIC_API_KEY",
+        "AI_KIT_ANTHROPIC_API_KEY",
         "ANTHROPIC_API_KEY",
     )
     anthropic_keys = _split_csv(
-        os.getenv("INFERENCE_KIT_ANTHROPIC_API_KEYS", "")
+        os.getenv("AI_KIT_ANTHROPIC_API_KEYS", "")
     )
     if anthropic_key or anthropic_keys:
         cfg = AnthropicConfig(
@@ -89,44 +89,44 @@ def get_hub() -> Optional[Hub]:
             api_keys=anthropic_keys or None,
         )
         base_url = (
-            os.getenv("INFERENCE_KIT_ANTHROPIC_BASE_URL", "")
+            os.getenv("AI_KIT_ANTHROPIC_BASE_URL", "")
         ).strip()
         if base_url:
             cfg.base_url = base_url
         version = (
-            os.getenv("INFERENCE_KIT_ANTHROPIC_VERSION", "")
+            os.getenv("AI_KIT_ANTHROPIC_VERSION", "")
         ).strip()
         if version:
             cfg.version = version
         providers["anthropic"] = cfg
 
     xai_key = _env_first(
-        "INFERENCE_KIT_XAI_API_KEY",
+        "AI_KIT_XAI_API_KEY",
         "XAI_API_KEY",
     )
     xai_keys = _split_csv(
-        os.getenv("INFERENCE_KIT_XAI_API_KEYS", "")
+        os.getenv("AI_KIT_XAI_API_KEYS", "")
     )
     if xai_key or xai_keys:
         cfg = XAIConfig(api_key=xai_key or "", api_keys=xai_keys or None)
         base_url = (
-            os.getenv("INFERENCE_KIT_XAI_BASE_URL", "")
+            os.getenv("AI_KIT_XAI_BASE_URL", "")
         ).strip()
         if base_url:
             cfg.base_url = base_url
         providers["xai"] = cfg
 
     google_key = _env_first(
-        "INFERENCE_KIT_GOOGLE_API_KEY",
+        "AI_KIT_GOOGLE_API_KEY",
         "GOOGLE_API_KEY",
     )
     google_keys = _split_csv(
-        os.getenv("INFERENCE_KIT_GOOGLE_API_KEYS", "")
+        os.getenv("AI_KIT_GOOGLE_API_KEYS", "")
     )
     if google_key or google_keys:
         cfg = GeminiConfig(api_key=google_key or "", api_keys=google_keys or None)
         base_url = (
-            os.getenv("INFERENCE_KIT_GOOGLE_BASE_URL", "")
+            os.getenv("AI_KIT_GOOGLE_BASE_URL", "")
         ).strip()
         if base_url:
             cfg.base_url = base_url
@@ -135,4 +135,4 @@ def get_hub() -> Optional[Hub]:
     if not providers:
         return None
 
-    return Hub(HubConfig(providers=providers))
+    return Kit(KitConfig(providers=providers))

@@ -16,7 +16,7 @@ from pipeline_core import (
 )
 from pipeline_core.remote import RemoteStageRunner
 
-from .inference_kit_client import get_hub
+from .ai_kit_client import get_kit
 
 
 DEFAULT_CAPTION_PROMPT = (
@@ -178,10 +178,10 @@ def _build_stage_runners(
         remote = RemoteStageRunner(remote_url, timeout_s=remote_timeout_s)
         return {stage: remote for stage in StageName}
     if runner_mode == "api":
-        hub = get_hub()
-        if hub is None:
-            raise RuntimeError("inference_kit is not configured with any providers")
-        return build_api_runners(hub, base_runners=build_local_runners())
+        kit = get_kit()
+        if kit is None:
+            raise RuntimeError("ai_kit is not configured with any providers")
+        return build_api_runners(kit, base_runners=build_local_runners())
     return {
         **build_local_runners(),
     }
@@ -233,11 +233,11 @@ def _generate_caption(
     temperature: float,
     max_tokens: int,
 ) -> dict:
-    from inference_kit.types import ContentPart, GenerateInput, Message
+    from ai_kit.types import ContentPart, GenerateInput, Message
 
-    hub = get_hub()
-    if hub is None:
-        raise RuntimeError("inference_kit is not configured with any providers")
+    kit = get_kit()
+    if kit is None:
+        raise RuntimeError("ai_kit is not configured with any providers")
 
     b64, mime = _encode_image_b64(input_path)
     messages = [
@@ -249,7 +249,7 @@ def _generate_caption(
             ],
         )
     ]
-    output = hub.generate(
+    output = kit.generate(
         GenerateInput(
             provider=provider,
             model=model,

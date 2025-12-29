@@ -37,10 +37,10 @@ The worker will:
 - process queued jobs
 - write a result (`result.gltf`) back to local storage
 
-## Optional: Inference Kit (model registry + captions)
+## Optional: ai-kit (model registry + captions)
 
-The demo UI pulls model metadata from `/v1/ai/provider-models` (inference-kit). Pipeline model dropdowns
-are backed by the inference-kit `catalog` provider, defined in the inference-kit repo at
+The demo UI pulls model metadata from `/v1/ai/provider-models` (ai-kit). Pipeline model dropdowns
+are backed by the ai-kit `catalog` provider, defined in the ai-kit repo at
 `models/catalog_models.json`. Vision-capable models still come from configured LLM providers and are
 used for captions.
 
@@ -48,14 +48,14 @@ If you only need the catalog (pipeline models), you can run with no provider key
 Set at least one provider key before starting the API and worker to enable captioning:
 
 ```bash
-export INFERENCE_KIT_OPENAI_API_KEY=...
-# or: INFERENCE_KIT_ANTHROPIC_API_KEY, INFERENCE_KIT_GOOGLE_API_KEY, INFERENCE_KIT_XAI_API_KEY
+export AI_KIT_OPENAI_API_KEY=...
+# or: AI_KIT_ANTHROPIC_API_KEY, AI_KIT_GOOGLE_API_KEY, AI_KIT_XAI_API_KEY
 ```
 
 Optional: point OpenAI-compatible requests at a local server:
 
 ```bash
-export INFERENCE_KIT_OPENAI_BASE_URL=http://localhost:11434/v1
+export AI_KIT_OPENAI_BASE_URL=http://localhost:11434/v1
 ```
 
 ## 3) Start the demo web app

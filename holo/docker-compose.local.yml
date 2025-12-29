@@ -17,6 +17,7 @@ services:
     environment:
       - HOLO_DATA_DIR=/data
       - HOLO_WORKER_POLL_INTERVAL=1.0
+      - AI_KIT_TRUST_REMOTE_CODE=1
     volumes:
       - ./local-data:/data
     depends_on:

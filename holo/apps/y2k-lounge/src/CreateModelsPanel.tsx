@@ -293,7 +293,7 @@ export function CreateModelsPanel() {
             !modelsError &&
             cutoutOptions.length === 0 &&
             depthOptions.length === 0 && (
-              <Hint>No pipeline models available from inference-kit.</Hint>
+              <Hint>No pipeline models available from ai-kit.</Hint>
             )}
         </Group>
 
@@ -355,7 +355,7 @@ export function CreateModelsPanel() {
           </Label>
           {modelsError && <Hint>Model list error: {modelsError}</Hint>}
           {!modelsError && providerOptions.length === 0 && (
-            <Hint>No vision-capable models available from inference-kit.</Hint>
+            <Hint>No vision-capable models available from ai-kit.</Hint>
           )}
         </Group>
 

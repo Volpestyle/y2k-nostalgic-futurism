@@ -55,6 +55,38 @@ const CreateModelsIcon = () => (
   </svg>
 );
 
+const SunIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <circle
+      cx="12"
+      cy="12"
+      r="4.2"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+    />
+    <path
+      d="M12 2.5v2.6M12 18.9v2.6M4.5 12H2M22 12h-2.5M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+const MoonIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M18.2 15.9a7.2 7.2 0 0 1-9-9 7.6 7.6 0 1 0 9 9Z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 const ToggleSidebarIcon = ({ open }: { open: boolean }) => (
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
     <path
@@ -170,9 +202,11 @@ export function App() {
             variant="ghost"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+            aria-label={theme === "dark" ? "Switch to light" : "Switch to dark"}
+            aria-pressed={theme === "dark"}
           >
-            <span className="navControlLabel">
-              {theme === "dark" ? "Day" : "Night"}
+            <span className="navControlIcon">
+              {theme === "dark" ? <SunIcon /> : <MoonIcon />}
             </span>
           </Button>
         </div>

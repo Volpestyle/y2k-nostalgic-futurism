@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	inferencekit "github.com/Volpestyle/inference-kit/packages/go"
+	aikit "github.com/Volpestyle/ai-kit/packages/go"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -23,7 +23,7 @@ type Server struct {
 	Blobs   blob.LocalFS
 	Jobs    *store.SQLite
 	BaseURL string // optional, for generating absolute result URLs
-	AIHub   *inferencekit.Hub
+	AIKit   *aikit.Kit
 	PipelineModels PipelineModels
 }
 
@@ -193,43 +193,43 @@ func (s Server) handleBakeModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) handleProviderModels(w http.ResponseWriter, r *http.Request) {
-	if s.AIHub == nil {
-		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("inference-kit is not configured"))
+	if s.AIKit == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("ai-kit is not configured"))
 		return
 	}
-	inferencekit.ModelsHandler(s.AIHub, nil)(w, r)
+	aikit.ModelsHandler(s.AIKit, nil)(w, r)
 }
 
 func (s Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
-	if s.AIHub == nil {
-		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("inference-kit is not configured"))
+	if s.AIKit == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("ai-kit is not configured"))
 		return
 	}
-	inferencekit.GenerateHandler(s.AIHub)(w, r)
+	aikit.GenerateHandler(s.AIKit)(w, r)
 }
 
 func (s Server) handleGenerateStream(w http.ResponseWriter, r *http.Request) {
-	if s.AIHub == nil {
-		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("inference-kit is not configured"))
+	if s.AIKit == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("ai-kit is not configured"))
 		return
 	}
-	inferencekit.GenerateSSEHandler(s.AIHub)(w, r)
+	aikit.GenerateSSEHandler(s.AIKit)(w, r)
 }
 
 func (s Server) handleImage(w http.ResponseWriter, r *http.Request) {
-	if s.AIHub == nil {
-		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("inference-kit is not configured"))
+	if s.AIKit == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("ai-kit is not configured"))
 		return
 	}
-	inferencekit.ImageHandler(s.AIHub)(w, r)
+	aikit.ImageHandler(s.AIKit)(w, r)
 }
 
 func (s Server) handleMesh(w http.ResponseWriter, r *http.Request) {
-	if s.AIHub == nil {
-		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("inference-kit is not configured"))
+	if s.AIKit == nil {
+		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("ai-kit is not configured"))
 		return
 	}
-	inferencekit.MeshHandler(s.AIHub)(w, r)
+	aikit.MeshHandler(s.AIKit)(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

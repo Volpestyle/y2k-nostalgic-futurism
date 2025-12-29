@@ -14,5 +14,5 @@ timm>=0.9.16
 scikit-image>=0.22.0
 # Shared pipeline interfaces
 -e ../pipeline-core
-# Local inference_kit (adjust the path if your repo lives elsewhere)
--e ../../../../inference-kit/packages/python
+# Local ai_kit (adjust the path if your repo lives elsewhere)
+-e ../../../../ai-kit/packages/python

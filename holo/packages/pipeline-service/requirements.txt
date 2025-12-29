@@ -11,4 +11,4 @@ accelerate>=0.28.0
 safetensors>=0.4.0
 timm>=0.9.16
 -e ../pipeline-core
--e ../../../../inference-kit/packages/python
+-e ../../../../ai-kit/packages/python

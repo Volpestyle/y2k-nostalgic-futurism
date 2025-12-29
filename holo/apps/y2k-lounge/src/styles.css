@@ -2,23 +2,75 @@
 
 :root {
   --lounge-bg: #05070c;
+  --lounge-bg-strong: #05070c;
+  --lounge-bg-deep: #05060a;
   --lounge-ink: #e9f3ff;
   --lounge-accent: #47f7d4;
   --lounge-accent-strong: #a0ffe9;
   --lounge-hot: #ffb35c;
   --lounge-nav: rgba(9, 14, 22, 0.86);
+  --lounge-nav-strong: rgba(16, 24, 36, 0.92);
   --lounge-panel: rgba(12, 18, 26, 0.82);
   --lounge-glow: rgba(71, 247, 212, 0.25);
+  --lounge-stage-sheen: rgba(0, 200, 255, 0.08);
+  --lounge-stage-hot: rgba(255, 179, 92, 0.18);
   --lounge-edge: rgba(120, 160, 200, 0.22);
+  --lounge-divider: rgba(130, 170, 200, 0.2);
+  --lounge-sidebar-muted: rgba(226, 238, 255, 0.6);
+  --lounge-sidebar-header: rgba(20, 30, 44, 0.85);
+  --lounge-sidebar-header-fade: rgba(12, 18, 26, 0);
+  --lounge-hud-panel: rgba(10, 15, 24, 0.9);
+  --lounge-hud-border: rgba(60, 90, 120, 0.8);
+  --lounge-hud-group: rgba(15, 22, 34, 0.82);
+  --lounge-viewer-border: rgba(120, 170, 220, 0.4);
+  --lounge-viewer-bg: rgba(5, 8, 14, 0.95);
+  --lounge-viewer-bg-alt: rgba(12, 18, 26, 0.95);
+  --lounge-scanline: rgba(255, 255, 255, 0.04);
+  --lounge-scanline-strong: rgba(255, 255, 255, 0.03);
   --lounge-sidebar-width: 360px;
   --lounge-sidebar-rail: 56px;
   --lounge-nav-height: 72px;
   --lounge-nav-collapsed-height: 38px;
 }
 
+body[data-theme="light"] {
+  --lounge-bg: #f2f1ea;
+  --lounge-bg-strong: #f8f7f1;
+  --lounge-bg-deep: #e6e3d7;
+  --lounge-ink: #1c2230;
+  --lounge-accent: #2f8de4;
+  --lounge-accent-strong: #2b6dbb;
+  --lounge-hot: #ff9d4d;
+  --lounge-nav: rgba(248, 247, 242, 0.88);
+  --lounge-nav-strong: rgba(235, 236, 240, 0.96);
+  --lounge-panel: rgba(247, 246, 240, 0.86);
+  --lounge-glow: rgba(47, 141, 228, 0.2);
+  --lounge-stage-sheen: rgba(0, 120, 200, 0.12);
+  --lounge-stage-hot: rgba(255, 169, 92, 0.2);
+  --lounge-edge: rgba(120, 140, 170, 0.35);
+  --lounge-divider: rgba(90, 110, 140, 0.25);
+  --lounge-sidebar-muted: rgba(60, 70, 90, 0.65);
+  --lounge-sidebar-header: rgba(235, 235, 230, 0.92);
+  --lounge-sidebar-header-fade: rgba(220, 220, 214, 0);
+  --lounge-hud-panel: rgba(250, 250, 245, 0.95);
+  --lounge-hud-border: rgba(120, 140, 170, 0.5);
+  --lounge-hud-group: rgba(236, 236, 230, 0.92);
+  --lounge-viewer-border: rgba(120, 150, 180, 0.45);
+  --lounge-viewer-bg: rgba(236, 240, 247, 0.96);
+  --lounge-viewer-bg-alt: rgba(222, 230, 240, 0.96);
+  --lounge-scanline: rgba(0, 0, 0, 0.06);
+  --lounge-scanline-strong: rgba(0, 0, 0, 0.04);
+}
+
 body {
-  background: radial-gradient(circle at 50% 15%, rgba(72, 255, 220, 0.08), transparent 50%),
-    linear-gradient(180deg, #05070c 0%, #05060a 60%, #070810 100%);
+  background:
+    radial-gradient(circle at 50% 15%, var(--lounge-glow), transparent 50%),
+    linear-gradient(
+      180deg,
+      var(--lounge-bg-strong) 0%,
+      var(--lounge-bg-deep) 60%,
+      var(--lounge-bg) 100%
+    );
   color: var(--lounge-ink);
   font-family: "IBM Plex Mono", "Monaco", "Consolas", "Courier New", monospace;
 }
@@ -39,7 +91,7 @@ body {
   inset: 0;
   z-index: 0;
   pointer-events: auto;
-  background: radial-gradient(circle at 70% 20%, rgba(0, 200, 255, 0.08), transparent 55%);
+  background: radial-gradient(circle at 70% 20%, var(--lounge-stage-sheen), transparent 55%);
 }
 
 .loungeVisualizer {
@@ -55,7 +107,7 @@ body {
   inset: -15%;
   background:
     radial-gradient(circle at 20% 30%, var(--lounge-glow), transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(255, 179, 92, 0.18), transparent 55%);
+    radial-gradient(circle at 80% 70%, var(--lounge-stage-hot), transparent 55%);
   opacity: 0.75;
   pointer-events: none;
 }
@@ -64,11 +116,16 @@ body {
   position: absolute;
   inset: 0;
   background:
-    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 6px);
+    repeating-linear-gradient(180deg, var(--lounge-scanline) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, var(--lounge-scanline-strong) 0 1px, transparent 1px 6px);
   mix-blend-mode: screen;
   opacity: 0.35;
   pointer-events: none;
+}
+
+body[data-theme="light"] .loungeStageScanlines {
+  mix-blend-mode: multiply;
+  opacity: 0.22;
 }
 
 .loungeNav {
@@ -82,7 +139,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: linear-gradient(180deg, rgba(16, 24, 36, 0.92), var(--lounge-nav));
+  background: linear-gradient(180deg, var(--lounge-nav-strong), var(--lounge-nav));
   border-bottom: 1px solid var(--lounge-edge);
   box-shadow: 0 12px 28px rgba(4, 8, 16, 0.65);
   backdrop-filter: blur(12px);
@@ -148,8 +205,17 @@ body {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+body[data-theme="light"] .loungeNavItem {
+  border-color: rgba(110, 130, 160, 0.6);
+  background: rgba(245, 248, 252, 0.8);
+}
+
 .loungeNavItem.isActive {
   box-shadow: 0 0 0 1px rgba(160, 255, 233, 0.3), 0 0 12px rgba(71, 247, 212, 0.35);
+}
+
+body[data-theme="light"] .loungeNavItem.isActive {
+  box-shadow: 0 0 0 1px rgba(80, 120, 170, 0.3), 0 0 12px rgba(47, 141, 228, 0.2);
 }
 
 .loungeNavItem:hover {
@@ -172,10 +238,23 @@ body {
 }
 
 .navControl {
-  padding: 6px 10px;
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  padding: 6px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.navControlIcon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+.navControlIcon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .loungeSidebar {
@@ -212,7 +291,11 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 16px 16px 10px;
-  background: linear-gradient(180deg, rgba(20, 30, 44, 0.85), rgba(12, 18, 26, 0));
+  background: linear-gradient(
+    180deg,
+    var(--lounge-sidebar-header),
+    var(--lounge-sidebar-header-fade)
+  );
   transition: padding 0.4s ease, opacity 0.25s ease, transform 0.4s ease;
 }
 
@@ -238,7 +321,7 @@ body {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.2em;
-  color: rgba(226, 238, 255, 0.6);
+  color: var(--lounge-sidebar-muted);
 }
 
 .sidebarToggle {
@@ -262,7 +345,7 @@ body {
 }
 
 .loungeDivider {
-  border-top: 1px solid rgba(130, 170, 200, 0.2);
+  border-top: 1px solid var(--lounge-divider);
   margin: 0 16px 8px;
 }
 
@@ -289,8 +372,8 @@ body {
 }
 
 .hudPanel {
-  background: rgba(10, 15, 24, 0.9);
-  border-color: rgba(60, 90, 120, 0.8);
+  background: var(--lounge-hud-panel);
+  border-color: var(--lounge-hud-border);
   box-shadow: inset 1px 1px 0 rgba(180, 220, 255, 0.12);
 }
 
@@ -301,7 +384,7 @@ body {
 }
 
 .hudPanel .ui-group {
-  background: rgba(15, 22, 34, 0.82);
+  background: var(--lounge-hud-group);
 }
 
 .hudPanelStack {
@@ -338,8 +421,8 @@ body {
 
 .hudViewerFrame {
   height: 220px;
-  border: 1px solid rgba(120, 170, 220, 0.4);
-  background: linear-gradient(180deg, rgba(5, 8, 14, 0.95), rgba(12, 18, 26, 0.95));
+  border: 1px solid var(--lounge-viewer-border);
+  background: linear-gradient(180deg, var(--lounge-viewer-bg), var(--lounge-viewer-bg-alt));
   box-shadow: inset 0 0 30px rgba(71, 247, 212, 0.08);
   overflow: hidden;
 }

@@ -3,13 +3,13 @@ module github.com/example/holo-2d3d/api-go
 go 1.22
 
 require (
-	github.com/Volpestyle/inference-kit v0.0.0-20251229021922-2a1297ea556d
+	github.com/Volpestyle/ai-kit v0.0.0-20251229021922-2a1297ea556d
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/google/uuid v1.6.0
 	modernc.org/sqlite v1.29.3
 )
 
-replace github.com/Volpestyle/inference-kit => /Users/jamesvolpe/web/inference-kit
+replace github.com/Volpestyle/ai-kit => /Users/jamesvolpe/web/inference-kit
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

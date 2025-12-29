@@ -13,10 +13,10 @@ from .types import Artifact, StageName, StageRequest, StageResult, StageRunner
 
 try:
     import numpy as np
-    from inference_kit import Hub
-    from inference_kit.types import ImageGenerateInput, ImageInput
+    from ai_kit import Kit
+    from ai_kit.types import ImageGenerateInput, ImageInput
 except ImportError as exc:  # pragma: no cover - handled at runtime
-    Hub = None
+    Kit = None
     ImageGenerateInput = None
     ImageInput = None
     np = None
@@ -26,15 +26,15 @@ else:
 
 
 def build_api_runners(
-    hub: Hub,
+    kit: Kit,
     *,
     base_runners: Mapping[StageName, StageRunner] | None = None,
 ) -> Dict[StageName, StageRunner]:
-    _require_inference_kit()
+    _require_ai_kit()
     runners = dict(base_runners or {})
-    runners[StageName.CUTOUT] = _ApiStageRunner(lambda req: _run_cutout_api(hub, req))
-    runners[StageName.VIEWS] = _ApiStageRunner(lambda req: _run_views_api(hub, req))
-    runners[StageName.DEPTH] = _ApiStageRunner(lambda req: _run_depth_api(hub, req))
+    runners[StageName.CUTOUT] = _ApiStageRunner(lambda req: _run_cutout_api(kit, req))
+    runners[StageName.VIEWS] = _ApiStageRunner(lambda req: _run_views_api(kit, req))
+    runners[StageName.DEPTH] = _ApiStageRunner(lambda req: _run_depth_api(kit, req))
     return runners
 
 
@@ -46,12 +46,12 @@ class _ApiStageRunner:
         return self._handler(request)
 
 
-def _run_cutout_api(hub: Hub, request: StageRequest) -> StageResult:
+def _run_cutout_api(kit: Kit, request: StageRequest) -> StageResult:
     provider, model = _require_provider_model(request)
     prompt = request.config.get("prompt") or (
         "Return a PNG cutout of the subject with transparency (alpha)."
     )
-    output = hub.generate_image(
+    output = kit.generate_image(
         ImageGenerateInput(
             provider=provider,
             model=model,
@@ -67,12 +67,12 @@ def _run_cutout_api(hub: Hub, request: StageRequest) -> StageResult:
     )
 
 
-def _run_depth_api(hub: Hub, request: StageRequest) -> StageResult:
+def _run_depth_api(kit: Kit, request: StageRequest) -> StageResult:
     provider, model = _require_provider_model(request)
     prompt = request.config.get("prompt") or (
         "Generate a grayscale depth map of the input image (white=near, black=far)."
     )
-    output = hub.generate_image(
+    output = kit.generate_image(
         ImageGenerateInput(
             provider=provider,
             model=model,
@@ -88,7 +88,7 @@ def _run_depth_api(hub: Hub, request: StageRequest) -> StageResult:
     )
 
 
-def _run_views_api(hub: Hub, request: StageRequest) -> StageResult:
+def _run_views_api(kit: Kit, request: StageRequest) -> StageResult:
     provider, model = _require_provider_model(request)
     count = _coerce_int(request.config.get("count"), 12)
     elev_deg = _coerce_float(request.config.get("elevDeg") or request.config.get("elev"), 10.0)
@@ -106,7 +106,7 @@ def _run_views_api(hub: Hub, request: StageRequest) -> StageResult:
     for idx, (pose, az_deg) in enumerate(poses):
         view_id = f"view_{idx:03d}"
         view_prompt = f"{prompt} Azimuth {az_deg:.1f}°, elevation {elev_deg:.1f}°."
-        output = hub.generate_image(
+        output = kit.generate_image(
             ImageGenerateInput(
                 provider=provider,
                 model=model,
@@ -140,10 +140,10 @@ def _run_views_api(hub: Hub, request: StageRequest) -> StageResult:
     )
 
 
-def _require_inference_kit() -> None:
-    if Hub is None or ImageGenerateInput is None or ImageInput is None:
+def _require_ai_kit() -> None:
+    if Kit is None or ImageGenerateInput is None or ImageInput is None:
         raise RuntimeError(
-            "inference_kit is required for API runners. Install the inference_kit python package."
+            "ai_kit is required for API runners. Install the ai_kit python package."
         ) from _IMPORT_ERROR
     if np is None:
         raise RuntimeError("numpy is required for API view generation") from _IMPORT_ERROR

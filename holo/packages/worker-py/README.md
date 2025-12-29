@@ -12,23 +12,26 @@ Replace the `worker/pipeline.py` steps with your actual pipeline:
 
 cutout → multi-view → depth → fuse → reconstruct mesh → decimate → export (GLB)
 
-## Inference Kit (optional)
+## ai-kit (optional)
 
-The placeholder pipeline can generate an optional caption with inference-kit if you enable it in the
-`BakeSpec` (`ai.caption.enabled=true`). Pipeline model dropdowns are driven by the inference-kit catalog
-defined in the inference-kit repo at `models/catalog_models.json`.
+The placeholder pipeline can generate an optional caption with ai-kit if you enable it in the
+`BakeSpec` (`ai.caption.enabled=true`). Pipeline model dropdowns are driven by the ai-kit catalog
+defined in the ai-kit repo at `models/catalog_models.json`.
 
-The requirements file installs inference-kit from a local path. If your directory layout differs, update:
+Novel-view models (Zero123/Stable Zero123/Zero123++) rely on remote pipeline code. Set
+`AI_KIT_TRUST_REMOTE_CODE=1` when running the worker so diffusers can load them.
+
+The requirements file installs ai-kit from a local path. If your directory layout differs, update:
 
 ```
-../../../../inference-kit/packages/python
+../../../../ai-kit/packages/python
 ```
 
 Provide provider keys via env (one is enough) if you want captioning:
 
 ```bash
-export INFERENCE_KIT_OPENAI_API_KEY=...
-# or: INFERENCE_KIT_ANTHROPIC_API_KEY, INFERENCE_KIT_GOOGLE_API_KEY, INFERENCE_KIT_XAI_API_KEY
+export AI_KIT_OPENAI_API_KEY=...
+# or: AI_KIT_ANTHROPIC_API_KEY, AI_KIT_GOOGLE_API_KEY, AI_KIT_XAI_API_KEY
 ```
 
 ## Run locally

@@ -38,19 +38,19 @@ func main() {
 		baseURL = fmt.Sprintf("http://%s", addr)
 	}
 
-	hub, err := ai.NewHubFromEnv()
+	kit, err := ai.NewKitFromEnv()
 	if err != nil {
-		log.Fatalf("inference-kit config error: %v", err)
+		log.Fatalf("ai-kit config error: %v", err)
 	}
-	if hub == nil {
-		log.Printf("inference-kit disabled (no provider keys configured)")
+	if kit == nil {
+		log.Printf("ai-kit disabled (no provider keys configured)")
 	}
 
 	server := httpapi.Server{
 		Blobs:   blobStore,
 		Jobs:    jobStore,
 		BaseURL: baseURL,
-		AIHub:   hub,
+		AIKit:   kit,
 		PipelineModels: httpapi.PipelineModels{
 			Cutout: cfg.CutoutModels,
 			Depth:  cfg.DepthModels,
