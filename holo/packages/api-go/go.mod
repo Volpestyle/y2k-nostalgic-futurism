@@ -9,7 +9,7 @@ require (
 	modernc.org/sqlite v1.29.3
 )
 
-replace github.com/Volpestyle/ai-kit => /Users/jamesvolpe/web/inference-kit
+replace github.com/Volpestyle/ai-kit => /Users/jamesvolpe/web/ai-kit
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
