@@ -6,6 +6,8 @@ export type JobStatusResponse = {
   id: string;
   status: "queued" | "running" | "done" | "error";
   progress: number;
+  createdAt?: string;
+  updatedAt?: string;
   inputKey: string;
   outputKey?: string;
   error?: string;
@@ -16,6 +18,7 @@ export type JobStatusResponse = {
 export type ModelCapabilities = {
   text: boolean;
   vision: boolean;
+  image?: boolean;
   tool_use: boolean;
   structured_output: boolean;
   reasoning: boolean;
@@ -31,12 +34,14 @@ export type ModelMetadata = {
   tokenPrices?: { input: number; output: number };
   deprecated?: boolean;
   inPreview?: boolean;
+  available?: boolean;
 };
 
 export interface HoloClient {
   createJob(args: { image: File | Blob; bakeSpec?: BakeSpec | unknown }): Promise<CreateJobResponse>;
   getJob(jobId: string): Promise<JobStatusResponse>;
   getResultUrl(jobId: string): string;
+  listJobs(args?: { status?: JobStatusResponse["status"]; limit?: number }): Promise<JobStatusResponse[]>;
   listProviderModels(args?: { providers?: string[]; refresh?: boolean }): Promise<ModelMetadata[]>;
 }
 
@@ -63,6 +68,21 @@ export function createHoloClient(baseUrl: string): HoloClient {
 
     getResultUrl(jobId) {
       return `${root}/v1/jobs/${jobId}/result`;
+    },
+
+    async listJobs(args) {
+      const params = new URLSearchParams();
+      if (args?.status) {
+        params.set("status", args.status);
+      }
+      if (args?.limit) {
+        params.set("limit", String(args.limit));
+      }
+      const query = params.toString();
+      const url = `${root}/v1/jobs${query ? `?${query}` : ""}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`listJobs failed: ${res.status} ${await res.text()}`);
+      return (await res.json()) as JobStatusResponse[];
     },
 
     async listProviderModels(args) {

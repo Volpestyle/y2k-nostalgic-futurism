@@ -7,14 +7,18 @@ export const BakeSpecV0_1 = z.object({
     .object({
       provider: z.string().optional(),
       model: z.string().default("rmbg-1.4"),
+      prompt: z.string().optional(),
       refine: z.enum(["none", "sam"]).default("none"),
-      feather: z.number().int().min(0).max(50).default(3)
+      feather: z.number().int().min(0).max(50).default(3),
+      size: z.string().optional(),
+      parameters: z.record(z.unknown()).optional(),
     })
     .default({}),
 
   views: z
     .object({
       count: z.number().int().min(1).max(64).default(12),
+      includeOriginal: z.boolean().default(true),
       elev: z.number().min(-45).max(45).default(10),
       fov: z.number().min(10).max(80).default(35),
       seed: z.number().int().min(0).max(2 ** 31 - 1).default(42),
@@ -22,6 +26,7 @@ export const BakeSpecV0_1 = z.object({
       model: z.string().optional(),
       prompt: z.string().optional(),
       size: z.string().optional(),
+      parameters: z.record(z.unknown()).optional(),
       resolution: z.number().int().min(256).max(1536).default(512),
     })
     .default({}),
@@ -30,12 +35,19 @@ export const BakeSpecV0_1 = z.object({
     .object({
       provider: z.string().optional(),
       model: z.string().default("depth-anything-v2-small"),
-      res: z.number().int().min(128).max(1024).default(512)
+      prompt: z.string().optional(),
+      res: z.number().int().min(128).max(1024).default(512),
+      size: z.string().optional(),
+      parameters: z.record(z.unknown()).optional(),
     })
     .default({}),
 
   recon: z
     .object({
+      provider: z.string().optional(),
+      model: z.string().optional(),
+      prompt: z.string().optional(),
+      format: z.string().optional(),
       method: z.enum(["poisson", "alpha-shape", "none"]).default("poisson"),
       voxel: z.number().min(0.0005).max(0.05).default(0.006)
     })

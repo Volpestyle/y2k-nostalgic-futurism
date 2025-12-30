@@ -8,14 +8,18 @@ export const BakeSpecSchema = z.object({
     .object({
       provider: z.string().optional(),
       model: z.string().default("rmbg-1.4"),
+      prompt: z.string().optional(),
       refine: z.enum(["none", "sam"]).default("none"),
       featherPx: z.number().int().min(0).max(20).default(3),
+      size: z.string().optional(),
+      parameters: z.record(z.unknown()).optional(),
     })
     .default({}),
   views: z
     .object({
       // For "Mode B" baking.
       count: z.number().int().min(1).max(64).default(12),
+      includeOriginal: z.boolean().default(true),
       elevDeg: z.number().min(-60).max(60).default(10),
       fovDeg: z.number().min(15).max(90).default(35),
       seed: z.number().int().min(0).max(2 ** 31 - 1).default(42),
@@ -23,6 +27,7 @@ export const BakeSpecSchema = z.object({
       model: z.string().optional(),
       prompt: z.string().optional(),
       size: z.string().optional(),
+      parameters: z.record(z.unknown()).optional(),
       resolution: z.number().int().min(256).max(1536).default(512),
     })
     .default({}),
@@ -30,13 +35,28 @@ export const BakeSpecSchema = z.object({
     .object({
       provider: z.string().optional(),
       model: z.string().default("depth-anything-v2-small"),
+      prompt: z.string().optional(),
+      size: z.string().optional(),
+      parameters: z.record(z.unknown()).optional(),
       resolution: z.number().int().min(256).max(1536).default(512),
+      depthInvert: z.boolean().optional(),
     })
     .default({}),
   recon: z
     .object({
+      provider: z.string().optional(),
+      model: z.string().optional(),
+      prompt: z.string().optional(),
+      format: z.string().optional(),
       method: z.enum(["poisson", "alpha"/*, "gsplat"*/]).default("poisson"),
       voxelSize: z.number().min(0).default(0.006),
+      points: z
+        .object({
+          enabled: z.boolean().default(false),
+          voxelSize: z.number().min(0).default(0),
+          maxPoints: z.number().int().min(0).default(0),
+        })
+        .default({}),
     })
     .default({}),
   mesh: z
