@@ -91,6 +91,59 @@ func (s *SQLite) GetJob(ctx context.Context, id string) (model.Job, error) {
 	return job, nil
 }
 
+func (s *SQLite) ListJobs(ctx context.Context, status *model.JobStatus, limit int) ([]model.Job, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+
+	query := `SELECT id, created_at, updated_at, status, progress, input_key, spec_json, output_key, error_message
+       FROM jobs`
+	args := []any{}
+	if status != nil {
+		query += " WHERE status = ?"
+		args = append(args, string(*status))
+	}
+	query += " ORDER BY updated_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []model.Job
+	for rows.Next() {
+		var (
+			jid, statusStr, inputKey, specJSON string
+			createdMs, updatedMs                 int64
+			progress                            float64
+			outputKey                           sql.NullString
+			errorMsg                            sql.NullString
+		)
+		if err := rows.Scan(&jid, &createdMs, &updatedMs, &statusStr, &progress, &inputKey, &specJSON, &outputKey, &errorMsg); err != nil {
+			return nil, err
+		}
+		job := model.Job{
+			ID:        jid,
+			CreatedAt: time.UnixMilli(createdMs),
+			UpdatedAt: time.UnixMilli(updatedMs),
+			Status:    model.JobStatus(statusStr),
+			Progress:  progress,
+			InputKey:  inputKey,
+			SpecJSON:  specJSON,
+		}
+		if outputKey.Valid {
+			job.OutputKey = outputKey.String
+		}
+		if errorMsg.Valid {
+			job.Error = errorMsg.String
+		}
+		out = append(out, job)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLite) ListQueued(ctx context.Context, limit int) ([]model.Job, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, created_at, updated_at, status, progress, input_key, spec_json, output_key, error_message

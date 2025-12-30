@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,8 +43,10 @@ func (s Server) Router() http.Handler {
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Post("/jobs", s.handleCreateJob)
+		r.Get("/jobs", s.handleListJobs)
 		r.Get("/jobs/{id}", s.handleGetJob)
 		r.Get("/jobs/{id}/result", s.handleGetResult)
+		r.Get("/jobs/{id}/result/*", s.handleGetResultFile)
 		r.Get("/jobs/{id}/artifacts/*", s.handleGetArtifact)
 		r.Route("/ai", func(r chi.Router) {
 			r.Get("/provider-models", s.handleProviderModels)
@@ -132,19 +135,45 @@ func (s Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := map[string]any{
-		"id":        job.ID,
-		"createdAt": job.CreatedAt,
-		"updatedAt": job.UpdatedAt,
-		"status":    job.Status,
-		"progress":  job.Progress,
-		"inputKey":  job.InputKey,
-		"outputKey": job.OutputKey,
-		"error":     job.Error,
-		"specJson":  job.SpecJSON,
+	writeJSON(w, http.StatusOK, jobResponse(job, s.BaseURL))
+}
+
+func (s Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var status *model.JobStatus
+	if raw := strings.TrimSpace(r.URL.Query().Get("status")); raw != "" {
+		parsed := model.JobStatus(raw)
+		switch parsed {
+		case model.JobQueued, model.JobRunning, model.JobDone, model.JobError:
+			status = &parsed
+		default:
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid status: %s", raw))
+			return
+		}
 	}
-	if job.OutputKey != "" {
-		resp["resultUrl"] = fmt.Sprintf("%s/v1/jobs/%s/result", strings.TrimRight(s.BaseURL, "/"), job.ID)
+
+	limit := 25
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid limit: %s", raw))
+			return
+		}
+		if value > 100 {
+			value = 100
+		}
+		limit = value
+	}
+
+	jobs, err := s.Jobs.ListJobs(ctx, status, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	resp := make([]map[string]any, 0, len(jobs))
+	for _, job := range jobs {
+		resp = append(resp, jobResponse(job, s.BaseURL))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -178,6 +207,70 @@ func (s Server) handleGetResult(w http.ResponseWriter, r *http.Request) {
 		contentType = "model/gltf+json"
 	}
 	w.Header().Set("Content-Type", contentType)
+	_, _ = io.Copy(w, f)
+}
+
+func (s Server) handleGetResultFile(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id := chi.URLParam(r, "id")
+	raw := strings.TrimPrefix(chi.URLParam(r, "*"), "/")
+
+	job, err := s.Jobs.GetJob(ctx, id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if job.OutputKey == "" || !s.Blobs.Exists(job.OutputKey) {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("result not ready"))
+		return
+	}
+
+	if raw == "" || raw == "." {
+		base := filepath.Base(job.OutputKey)
+		http.Redirect(w, r, fmt.Sprintf("/v1/jobs/%s/result/%s", id, base), http.StatusFound)
+		return
+	}
+
+	clean := filepath.Clean(raw)
+	if clean == "." || strings.HasPrefix(clean, "..") || strings.Contains(clean, string(filepath.Separator)+"..") {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid result path"))
+		return
+	}
+	if inputBase := filepath.Base(job.InputKey); inputBase != "" && clean == inputBase {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("result not found"))
+		return
+	}
+
+	resultDir := filepath.Dir(job.OutputKey)
+	relPath := filepath.Join(resultDir, clean)
+	if !s.Blobs.Exists(relPath) {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("result not found"))
+		return
+	}
+	f, err := s.Blobs.Open(relPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	contentType := http.DetectContentType(buf[:n])
+	if ext := filepath.Ext(clean); ext != "" {
+		if mimeType := mime.TypeByExtension(ext); mimeType != "" {
+			if contentType == "application/octet-stream" || strings.HasPrefix(contentType, "text/plain") {
+				contentType = mimeType
+			}
+		}
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
 	_, _ = io.Copy(w, f)
 }
 
@@ -264,6 +357,26 @@ func (s Server) handleMesh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	aikit.MeshHandler(s.AIKit)(w, r)
+}
+
+func jobResponse(job model.Job, baseURL string) map[string]any {
+	resp := map[string]any{
+		"id":        job.ID,
+		"createdAt": job.CreatedAt,
+		"updatedAt": job.UpdatedAt,
+		"status":    job.Status,
+		"progress":  job.Progress,
+		"inputKey":  job.InputKey,
+		"outputKey": job.OutputKey,
+		"error":     job.Error,
+		"specJson":  job.SpecJSON,
+	}
+	if job.OutputKey != "" {
+		base := strings.TrimRight(baseURL, "/")
+		filename := filepath.Base(job.OutputKey)
+		resp["resultUrl"] = fmt.Sprintf("%s/v1/jobs/%s/result/%s", base, job.ID, filename)
+	}
+	return resp
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

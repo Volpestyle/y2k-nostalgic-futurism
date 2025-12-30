@@ -60,6 +60,39 @@ func NewKitFromEnv() (*aikit.Kit, error) {
 		hasProvider = true
 	}
 
+	replicateKey := envFirst("AI_KIT_REPLICATE_API_KEY", "REPLICATE_API_TOKEN", "REPLICATE_API_KEY")
+	replicateKeys := splitCSV(os.Getenv("AI_KIT_REPLICATE_API_KEYS"))
+	if replicateKey != "" || len(replicateKeys) > 0 {
+		cfg.Replicate = &aikit.ReplicateConfig{
+			APIKey:  replicateKey,
+			APIKeys: replicateKeys,
+			BaseURL: strings.TrimSpace(os.Getenv("AI_KIT_REPLICATE_BASE_URL")),
+		}
+		hasProvider = true
+	}
+
+	falKey := envFirst("AI_KIT_FAL_API_KEY", "FAL_API_KEY", "FAL_KEY")
+	falKeys := splitCSV(os.Getenv("AI_KIT_FAL_API_KEYS"))
+	if falKey != "" || len(falKeys) > 0 {
+		cfg.Fal = &aikit.FalConfig{
+			APIKey:  falKey,
+			APIKeys: falKeys,
+			BaseURL: strings.TrimSpace(os.Getenv("AI_KIT_FAL_BASE_URL")),
+		}
+		hasProvider = true
+	}
+
+	meshyKey := envFirst("AI_KIT_MESHY_API_KEY", "MESHY_API_KEY")
+	meshyKeys := splitCSV(os.Getenv("AI_KIT_MESHY_API_KEYS"))
+	if meshyKey != "" || len(meshyKeys) > 0 {
+		cfg.Meshy = &aikit.MeshyConfig{
+			APIKey:  meshyKey,
+			APIKeys: meshyKeys,
+			BaseURL: strings.TrimSpace(os.Getenv("AI_KIT_MESHY_BASE_URL")),
+		}
+		hasProvider = true
+	}
+
 	if !hasProvider && !aikit.HasCatalogModels() {
 		return nil, nil
 	}

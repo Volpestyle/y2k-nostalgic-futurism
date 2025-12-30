@@ -13,9 +13,11 @@ import (
 	"github.com/example/holo-2d3d/api-go/internal/config"
 	"github.com/example/holo-2d3d/api-go/internal/httpapi"
 	"github.com/example/holo-2d3d/api-go/internal/store"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	loadDotEnv()
 	cfg := config.Load()
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		log.Fatalf("mkdir data dir: %v", err)
@@ -56,5 +58,24 @@ func main() {
 	log.Printf("API listening on %s (baseURL=%s)", cfg.Addr, baseURL)
 	if err := http.ListenAndServe(cfg.Addr, server.Router()); err != nil {
 		log.Fatalf("listen: %v", err)
+	}
+}
+
+func loadDotEnv() {
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	for i := 0; i < 5; i++ {
+		envPath := filepath.Join(dir, ".env")
+		if _, err := os.Stat(envPath); err == nil {
+			_ = godotenv.Load(envPath)
+			return
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return
+		}
+		dir = parent
 	}
 }
