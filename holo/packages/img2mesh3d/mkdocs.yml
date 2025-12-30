@@ -1,0 +1,6 @@
+site_name: img2mesh3d
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
