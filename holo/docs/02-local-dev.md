@@ -58,6 +58,14 @@ Optional: point OpenAI-compatible requests at a local server:
 export AI_KIT_OPENAI_BASE_URL=http://localhost:11434/v1
 ```
 
+If you want Hugging Face-backed cutout/depth/views, set the HF token in **both** the API and
+worker environments so model listing and inference succeed:
+
+```bash
+export AI_KIT_HUGGINGFACE_TOKEN=...
+# or: HUGGINGFACE_TOKEN, HF_TOKEN
+```
+
 ## 3) Start the demo web app
 
 ```bash
@@ -75,10 +83,13 @@ Open the Vite URL (printed in the terminal), upload an image, and wait for the p
 
 ### Pipeline runner modes
 
-The worker supports pluggable stage runners (local vs remote). Configure with:
+The worker auto-selects local vs api based on the BakeSpec (any stage with a
+`provider` uses api runners with local fallback). You can override:
 
 ```bash
 export HOLO_PIPELINE_RUNNER=local
+# export HOLO_PIPELINE_RUNNER=api
+# export HOLO_PIPELINE_RUNNER=auto
 # for remote stages:
 # export HOLO_PIPELINE_RUNNER=remote
 # export HOLO_PIPELINE_REMOTE_URL=http://localhost:9090

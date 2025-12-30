@@ -12,7 +12,7 @@ pip install -r requirements.txt
 uvicorn server:app --host 0.0.0.0 --port 9090
 ```
 
-Then point the worker at it:
+Then point the worker at it (overriding auto mode):
 
 ```bash
 export HOLO_PIPELINE_RUNNER=remote
