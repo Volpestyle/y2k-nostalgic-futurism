@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "pnpm -r dev",
-    "dev:api": "pnpm --silent exec -- bash -lc 'cd packages/api-go && go run ./cmd/api'",
+    "dev:api": "pnpm --silent exec -- bash -lc 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd packages/api-go && go run ./cmd/api'",
     "dev:worker": "pnpm --silent exec -- bash -lc 'if [ -f .env ]; then set -a; source .env; set +a; fi; cd packages/worker-py && PY_BIN=python; if command -v python3.11 >/dev/null 2>&1; then PY_BIN=python3.11; fi && if [ -d .venv ]; then VENV_PY=.venv/bin/python; if [ ! -x \"$VENV_PY\" ]; then rm -rf .venv; else VENV_VER=$($VENV_PY -c \"import sys; print(f\\\"{sys.version_info[0]}.{sys.version_info[1]}\\\")\"); TARGET_VER=$($PY_BIN -c \"import sys; print(f\\\"{sys.version_info[0]}.{sys.version_info[1]}\\\")\"); if [ \"$VENV_VER\" != \"$TARGET_VER\" ]; then rm -rf .venv; fi; fi; fi && if [ ! -d .venv ]; then \"$PY_BIN\" -m venv .venv; fi && .venv/bin/python -m pip install -r requirements.txt && .venv/bin/python -m worker.worker'",
     "dev:web": "pnpm --filter @holo/y2k-lounge dev",
     "build": "pnpm -r build",

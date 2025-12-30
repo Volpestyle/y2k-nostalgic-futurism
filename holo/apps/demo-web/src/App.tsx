@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createHoloClient, type ModelMetadata } from "@holo/sdk";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createHoloClient, type JobStatusResponse, type ModelMetadata } from "@holo/sdk";
 import { BasicGltfViewer } from "@holo/viewer-three";
 import { BakeSpecSchema } from "@holo/shared-spec";
 import {
@@ -32,6 +32,28 @@ const defaultCaptionPrompt =
   "Describe the subject and materials in this image for 3D reconstruction. Keep it brief.";
 type PipelineSource = "local" | "api";
 
+const formatJobTimestamp = (raw?: string) => {
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString();
+};
+
+const formatJobLabel = (job: JobStatusResponse) => {
+  const timestamp = formatJobTimestamp(job.updatedAt || job.createdAt);
+  const shortId = job.id.slice(0, 8);
+  if (timestamp) return `${timestamp} | ${shortId}`;
+  return job.id;
+};
+
+const filterModelsByFamily = (models: ModelMetadata[], family: string) => {
+  const familyTagged = models.filter((model) => model.family);
+  if (familyTagged.length === 0) {
+    return models;
+  }
+  return models.filter((model) => model.family === family);
+};
+
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewerRef = useRef<BasicGltfViewer | null>(null);
@@ -39,6 +61,10 @@ export function App() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [jobIdInput, setJobIdInput] = useState("");
+  const [recentJobs, setRecentJobs] = useState<JobStatusResponse[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("idle");
   const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
@@ -48,15 +74,15 @@ export function App() {
 
   const [cutoutSource, setCutoutSource] = useState<PipelineSource>("local");
   const [cutoutModel, setCutoutModel] = useState("rmbg-1.4");
-  const [cutoutProvider, setCutoutProvider] = useState("openai");
+  const [cutoutProvider, setCutoutProvider] = useState("huggingface");
   const [cutoutApiModel, setCutoutApiModel] = useState("");
   const [depthSource, setDepthSource] = useState<PipelineSource>("local");
   const [depthModel, setDepthModel] = useState("depth-anything-v2-small");
-  const [depthProvider, setDepthProvider] = useState("openai");
+  const [depthProvider, setDepthProvider] = useState("huggingface");
   const [depthApiModel, setDepthApiModel] = useState("");
   const [viewsSource, setViewsSource] = useState<PipelineSource>("local");
   const [viewsModel, setViewsModel] = useState("stable-zero123");
-  const [viewsProvider, setViewsProvider] = useState("openai");
+  const [viewsProvider, setViewsProvider] = useState("huggingface");
   const [viewsApiModel, setViewsApiModel] = useState("");
   const [viewsCount, setViewsCount] = useState(8);
   const [captionEnabled, setCaptionEnabled] = useState(false);
@@ -80,6 +106,11 @@ export function App() {
   useEffect(() => {
     document.body.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    setJobIdInput(jobId);
+  }, [jobId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,13 +159,22 @@ export function App() {
     return Array.from(new Set(visionModels.map((model) => model.provider))).sort();
   }, [visionModels]);
   const cutoutProviderModels = useMemo(() => {
-    return visionModels.filter((model) => model.provider === cutoutProvider);
+    return filterModelsByFamily(
+      visionModels.filter((model) => model.provider === cutoutProvider),
+      "cutout"
+    );
   }, [visionModels, cutoutProvider]);
   const depthProviderModels = useMemo(() => {
-    return visionModels.filter((model) => model.provider === depthProvider);
+    return filterModelsByFamily(
+      visionModels.filter((model) => model.provider === depthProvider),
+      "depth"
+    );
   }, [visionModels, depthProvider]);
   const viewsProviderModels = useMemo(() => {
-    return visionModels.filter((model) => model.provider === viewsProvider);
+    return filterModelsByFamily(
+      visionModels.filter((model) => model.provider === viewsProvider),
+      "views"
+    );
   }, [visionModels, viewsProvider]);
   const providerModels = useMemo(() => {
     return visionModels.filter((model) => model.provider === captionProvider);
@@ -226,6 +266,47 @@ export function App() {
     }
   }, [providerModels, captionModel]);
 
+  const loadRecentJobs = useCallback(async () => {
+    setJobsLoading(true);
+    setJobsError(null);
+    try {
+      const items = await client.listJobs({ status: "done", limit: 12 });
+      setRecentJobs(items);
+    } catch (err: any) {
+      setJobsError(String(err?.message || err));
+    } finally {
+      setJobsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRecentJobs();
+  }, [loadRecentJobs]);
+
+  useEffect(() => {
+    if (!jobIdInput && recentJobs.length > 0) {
+      setJobIdInput(recentJobs[0].id);
+    }
+  }, [jobIdInput, recentJobs]);
+
+  useEffect(() => {
+    if (status !== "done") return;
+    loadRecentJobs();
+  }, [status, loadRecentJobs]);
+
+  const loadJob = useCallback(() => {
+    const trimmed = jobIdInput.trim();
+    if (!trimmed) return;
+    setError(null);
+    setProgress(0);
+    setStatus("loading");
+    setJobId(trimmed);
+  }, [jobIdInput]);
+
+  const selectedRecentJobId = recentJobs.some((job) => job.id === jobIdInput)
+    ? jobIdInput
+    : "";
+
   async function startBake() {
     setError(null);
     if (!file) return;
@@ -281,7 +362,7 @@ export function App() {
         setStatus(j.status);
         setProgress(j.progress);
         if (j.status === "done") {
-          const url = client.getResultUrl(jobId);
+          const url = j.resultUrl || client.getResultUrl(jobId);
           await viewerRef.current?.load(url);
           return;
         }
@@ -335,6 +416,46 @@ export function App() {
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                 />
               </Label>
+
+              <Group>
+                <GroupTitle>Load existing job</GroupTitle>
+                <Label>
+                  Completed jobs
+                  <Select
+                    value={selectedRecentJobId}
+                    onChange={(e) => setJobIdInput(e.target.value)}
+                    disabled={recentJobs.length === 0}
+                  >
+                    <option value="">
+                      {recentJobs.length === 0 ? "No completed jobs yet" : "Select a job"}
+                    </option>
+                    {recentJobs.map((job) => (
+                      <option key={job.id} value={job.id}>
+                        {formatJobLabel(job)}
+                      </option>
+                    ))}
+                  </Select>
+                </Label>
+                <Label>
+                  Or paste job ID
+                  <Input
+                    type="text"
+                    value={jobIdInput}
+                    placeholder="Paste a job id"
+                    onChange={(e) => setJobIdInput(e.target.value)}
+                  />
+                </Label>
+                <FieldRow>
+                  <Button onClick={loadJob} disabled={!jobIdInput.trim()}>
+                    Load job
+                  </Button>
+                  <Button onClick={loadRecentJobs} disabled={jobsLoading} variant="ghost">
+                    {jobsLoading ? "Refreshing..." : "Refresh list"}
+                  </Button>
+                </FieldRow>
+                <Hint>Load a previous job to restore its artifacts and preview.</Hint>
+                {jobsError && <Hint>Job list error: {jobsError}</Hint>}
+              </Group>
 
               <Group>
                 <GroupTitle>Pipeline models</GroupTitle>
