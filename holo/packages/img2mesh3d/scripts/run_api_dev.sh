@@ -1,6 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-# Requires: pip install -e ".[api]"
-export PYTHONPATH=src
-uvicorn img2mesh3d.api.app:app --reload --host 0.0.0.0 --port 8000
+IMG2MESH3D_LOCAL_MODE=1 uvicorn img2mesh3d.api.app:app --host 0.0.0.0 --port 8080 --reload

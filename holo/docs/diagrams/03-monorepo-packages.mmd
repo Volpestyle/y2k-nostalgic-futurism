@@ -9,18 +9,16 @@ flowchart TB
     SPEC[packages/shared-spec\nBakeSpec schema/types]
     SDK[packages/sdk-js\nClient SDK]
     VIEW[packages/viewer-three\nThree.js viewer]
-    API[packages/api-go\nGo API]
-    WRK[packages/worker-py\nPython worker]
+    I2M[packages/img2mesh3d\nAPI + worker + pipeline]
   end
 
   ROOT --> apps
   ROOT --> packages
 
   SPEC --> SDK
-  SPEC --> API
-  SPEC --> WRK
+  SPEC --> I2M
 
   SDK --> DEMO
   VIEW --> DEMO
 
-  API <--> WRK
+  SDK --> I2M

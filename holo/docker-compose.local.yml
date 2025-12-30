@@ -1,24 +1,14 @@
 services:
   api:
     build:
-      context: ./packages/api-go
+      context: ./packages/img2mesh3d
+      dockerfile: docker/api.Dockerfile
     environment:
-      - HOLO_API_ADDR=:8080
-      - HOLO_DATA_DIR=/data
-      - HOLO_BASE_URL=http://localhost:8080
+      - IMG2MESH3D_LOCAL_MODE=1
+      - IMG2MESH3D_LOCAL_DIR=/data/img2mesh3d
+      - REPLICATE_API_TOKEN
+      - MESHY_API_KEY
     volumes:
       - ./local-data:/data
     ports:
       - "8080:8080"
-
-  worker:
-    build:
-      context: ./packages/worker-py
-    environment:
-      - HOLO_DATA_DIR=/data
-      - HOLO_WORKER_POLL_INTERVAL=1.0
-      - AI_KIT_TRUST_REMOTE_CODE=1
-    volumes:
-      - ./local-data:/data
-    depends_on:
-      - api

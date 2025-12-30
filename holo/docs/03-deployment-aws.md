@@ -11,7 +11,7 @@ This scaffold is designed so you can swap local adapters for AWS-managed buildin
 ## Suggested "scale-to-zero" shape
 
 1) Client uploads input to S3 via pre-signed URL.
-2) Go API enqueues a job (SQS) and stores spec/state (DynamoDB).
+2) img2mesh3d API enqueues a job (SQS) and stores spec/state (DynamoDB).
 3) Batch compute environment spins up GPU instance(s) only when jobs exist.
 4) Worker writes outputs back to S3.
 5) Client polls status or listens for completion.
@@ -26,8 +26,7 @@ Treat `BakeSpec` as an API contract:
 
 ## Checklist
 
-- [ ] Containerize `packages/api-go`
-- [ ] Containerize the worker pipeline (`packages/worker-py`)
-- [ ] Replace localfs/sqlite adapters in Go with S3/DynamoDB/SQS adapters
+- [ ] Containerize `packages/img2mesh3d` API
+- [ ] Containerize the `img2mesh3d-worker`
 - [ ] Add auth + rate limiting
 - [ ] Add observability (structured logs, traces, metrics)

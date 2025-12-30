@@ -2,15 +2,14 @@
 
 This repo separates **traffic-handling** from **GPU baking**:
 
-- **Go API (`packages/api-go`)** handles HTTP, auth (later), rate limiting (later), job state, and returning URLs.
-- **Python worker (`packages/worker-py`)** runs the compute-heavy pipeline stages.
+- **img2mesh3d (`packages/img2mesh3d`)** provides the FastAPI job API, SQS worker, and the pipeline stages.
 - **BakeSpec (`packages/shared-spec`)** is a versioned JSON contract shared by all apps/services.
 
 Why this shape?
 
 - The client API stays stable while you swap implementations:
-  - local: filesystem + sqlite + local worker process
-  - cloud: S3 + SQS + Batch/SageMaker GPU jobs
+  - local: filesystem + in-process job runner
+  - cloud: S3 + SQS + GPU workers
 
 ## Pipeline stages (suggested)
 

@@ -1,18 +1,6 @@
 flowchart TD
-  A[Single 2D Image] --> B[Remove background<br/>Replicate: bria/remove-background]
-  B --> C[Generate 6 views<br/>Replicate: jd7h/zero123plusplus]
-  C --> D[Depth maps for each view<br/>Replicate: chenxwh/depth-anything-v2]
-  C --> E[Select 1-4 views for reconstruction]
-  E --> F[Reconstruction + Texturing<br/>Meshy: multi-image-to-3d]
-  F --> G[GLB + textures]
-  G --> H[Renderable in Three.js]
-
-  subgraph Artifacts
-    X[(Run folder)]
-  end
-
-  A --> X
-  B --> X
-  C --> X
-  D --> X
-  F --> X
+  A[Input image] --> B[Remove background\nReplicate: bria/remove-background]
+  B --> C[Generate multi-views\nReplicate: jd7h/zero123plusplus]
+  C --> D[Depth for each view\nReplicate: chenxwh/depth-anything-v2]
+  D --> E[Reconstruction\nMeshy: multi-image-to-3d]
+  E --> F[GLB model\nThree.js renderable]

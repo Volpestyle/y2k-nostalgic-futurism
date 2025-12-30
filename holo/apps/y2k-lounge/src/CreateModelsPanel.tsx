@@ -294,6 +294,7 @@ export function CreateModelsPanel({
   const [pointsUrl, setPointsUrl] = useState<string | null>(null);
   const cutoutPreviewRef = useRef<string | null>(null);
   const depthPreviewRef = useRef<string | null>(null);
+  const depthMapUrlsRef = useRef<string[]>([]);
   const depthMapsRef = useRef<Record<string, string>>({});
   const pointsLoadedRef = useRef<string | null>(null);
   const artifactsLoadedRef = useRef({ cutout: false, views: false, depth: false, points: false });
@@ -302,7 +303,7 @@ export function CreateModelsPanel({
     normalizePipelineSource(storedPipelineSettings?.cutoutSource)
   );
   const [cutoutModel, setCutoutModel] = useState(
-    storedPipelineSettings?.cutoutModel || "rmbg-1.4"
+    storedPipelineSettings?.cutoutModel || "bria/remove-background"
   );
   const [cutoutProvider, setCutoutProvider] = useState(
     storedPipelineSettings?.cutoutProvider || "replicate"
@@ -322,7 +323,7 @@ export function CreateModelsPanel({
     normalizePipelineSource(storedPipelineSettings?.depthSource)
   );
   const [depthModel, setDepthModel] = useState(
-    storedPipelineSettings?.depthModel || "depth-anything-v2-small"
+    storedPipelineSettings?.depthModel || "chenxwh/depth-anything-v2"
   );
   const [depthProvider, setDepthProvider] = useState(
     storedPipelineSettings?.depthProvider || "replicate"
@@ -345,14 +346,14 @@ export function CreateModelsPanel({
     if (typeof storedPipelineSettings?.depthInvert === "boolean") {
       return storedPipelineSettings.depthInvert;
     }
-    const modelId = storedPipelineSettings?.depthModel || "depth-anything-v2-small";
+    const modelId = storedPipelineSettings?.depthModel || "chenxwh/depth-anything-v2";
     return depthModelUsesInverse(modelId);
   });
   const [viewsSource, setViewsSource] = useState<PipelineSource>(() =>
     normalizePipelineSource(storedPipelineSettings?.viewsSource)
   );
   const [viewsModel, setViewsModel] = useState(
-    storedPipelineSettings?.viewsModel || "stable-zero123"
+    storedPipelineSettings?.viewsModel || "jd7h/zero123plusplus"
   );
   const [viewsProvider, setViewsProvider] = useState(
     storedPipelineSettings?.viewsProvider || "replicate"
@@ -447,6 +448,10 @@ export function CreateModelsPanel({
   useEffect(() => {
     artifactsLoadedRef.current = { cutout: false, views: false, depth: false, points: false };
     depthMapsRef.current = {};
+    for (const url of depthMapUrlsRef.current) {
+      URL.revokeObjectURL(url);
+    }
+    depthMapUrlsRef.current = [];
     pointsLoadedRef.current = null;
     if (cutoutPreviewRef.current) {
       URL.revokeObjectURL(cutoutPreviewRef.current);
@@ -1024,6 +1029,16 @@ export function CreateModelsPanel({
         try {
           const res = await fetch(item.depthUrl, { cache: "no-store" });
           if (!res.ok) continue;
+          const contentType = res.headers.get("content-type") ?? "";
+          if (contentType.includes("image/") || item.depthUrl.endsWith(".png")) {
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            depthMapUrlsRef.current.push(url);
+            if (!cancelled) {
+              setDepthMaps((prev) => ({ ...prev, [item.id]: url }));
+            }
+            continue;
+          }
           const buffer = await res.arrayBuffer();
           const { data, shape } = parseNpyFloat32(buffer);
           const preview = buildDepthPreview(data, shape, item.depthMin, item.depthMax);

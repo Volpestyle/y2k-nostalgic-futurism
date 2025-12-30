@@ -1,0 +1,10 @@
+flowchart LR
+  U[Client] -->|POST /v1/jobs| API[FastAPI API]
+  API -->|Upload input| S3[(S3 artifacts bucket)]
+  API -->|Send message| Q[SQS queue]
+  W[Worker (ECS/Fargate)] -->|Long poll| Q
+  W -->|Read/Write| DDB[(DynamoDB job table)]
+  W -->|Download input\nUpload artifacts| S3
+  U -->|GET /v1/jobs/{id}| API
+  U -->|GET /v1/jobs/{id}/events (SSE)| API
+  API -->|Query events| DDB

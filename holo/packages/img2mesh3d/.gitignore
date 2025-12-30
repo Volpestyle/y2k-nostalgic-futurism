@@ -1,7 +1,12 @@
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
 dist/
 build/
-*.egg-info/
+.runs/
 runs/
+.env
+.DS_Store
