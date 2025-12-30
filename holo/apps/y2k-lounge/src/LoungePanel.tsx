@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { defaultParams, presets as visualizerPresets } from "@holo/visualizer-three";
 import type { VisualizerApp } from "@holo/visualizer-three";
 import {
   Badge,
@@ -17,6 +18,8 @@ import {
   Select,
   Status
 } from "@holo/ui-kit";
+import { AudioControls } from "./AudioControls";
+import { useAudioLounge } from "./AudioLoungeContext";
 
 type ParamSchemaItem = {
   path: string;
@@ -31,10 +34,79 @@ type ParamSchemaItem = {
 
 type PresetOption = { id: string; label: string };
 
-type AudioSource = "file" | "mic" | "none";
-
 type LoungePanelProps = {
   visualizer: VisualizerApp | null;
+};
+
+type VisualizerStorage = {
+  activePreset?: string;
+  presets?: Record<string, Record<string, any>>;
+};
+
+const VISUALIZER_STORAGE_KEY = "y2k-lounge.visualizer-settings";
+
+const readVisualizerStorage = (): VisualizerStorage => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(VISUALIZER_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as VisualizerStorage;
+  } catch {
+    return {};
+  }
+};
+
+const writeVisualizerStorage = (payload: VisualizerStorage) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(VISUALIZER_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore storage write errors
+  }
+};
+
+const deepClone = <T,>(value: T): T => {
+  const clone = (globalThis as { structuredClone?: (input: T) => T }).structuredClone;
+  if (typeof clone === "function") {
+    return clone(value);
+  }
+  return JSON.parse(JSON.stringify(value));
+};
+
+const deepMerge = (target: Record<string, any>, patch: Record<string, any>) => {
+  Object.entries(patch || {}).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      target[key] = value.slice();
+      return;
+    }
+    if (value && typeof value === "object") {
+      if (!target[key] || typeof target[key] !== "object") target[key] = {};
+      deepMerge(target[key], value as Record<string, any>);
+      return;
+    }
+    target[key] = value;
+  });
+  return target;
+};
+
+const buildPresetDefaults = (presetId: string) => {
+  const base = deepClone(defaultParams) as Record<string, any>;
+  const presetDef = visualizerPresets.find((preset) => preset.id === presetId);
+  if (presetDef?.params) {
+    deepMerge(base, presetDef.params as Record<string, any>);
+  }
+  base.preset = presetId;
+  return base;
+};
+
+const buildPresetState = (presetId: string, stored?: Record<string, any>) => {
+  const base = buildPresetDefaults(presetId);
+  if (stored) {
+    deepMerge(base, stored);
+  }
+  return base;
 };
 
 const getByPath = (obj: Record<string, any> | null, path: string) => {
@@ -61,37 +133,71 @@ const visualizerGroupForPreset = (presetId: string | null) => {
 };
 
 export function LoungePanel({ visualizer }: LoungePanelProps) {
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const audioConnectedRef = useRef(false);
+  const { trackName } = useAudioLounge();
 
   const [params, setParams] = useState<Record<string, any> | null>(null);
   const [schema, setSchema] = useState<ParamSchemaItem[]>([]);
-  const [presets, setPresets] = useState<PresetOption[]>([]);
+  const [presetOptions, setPresetOptions] = useState<PresetOption[]>([]);
   const [presetId, setPresetId] = useState<string | null>(null);
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [trackName, setTrackName] = useState("No track loaded");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [audioSource, setAudioSource] = useState<AudioSource>("none");
-
-  const handleAudioRef = useCallback((node: HTMLAudioElement | null) => {
-    setAudioEl(node);
-  }, []);
+  const storageRef = useRef<VisualizerStorage>({});
+  const isHydratingRef = useRef(false);
 
   useEffect(() => {
     if (!visualizer) return;
 
-    setParams(visualizer.getParams());
+    storageRef.current = readVisualizerStorage();
+
     setSchema(visualizer.getParamSchema() as ParamSchemaItem[]);
-    setPresets(visualizer.getPresets());
+    const presetList = visualizer.getPresets();
+    setPresetOptions(presetList);
+
+    const presetIds = new Set(presetList.map((preset) => preset.id));
+    const currentParams = visualizer.getParams();
+    let targetPreset = currentParams.preset ?? null;
+
+    if (storageRef.current.activePreset && presetIds.has(storageRef.current.activePreset)) {
+      targetPreset = storageRef.current.activePreset;
+    }
+
+    if (targetPreset && targetPreset !== currentParams.preset) {
+      isHydratingRef.current = true;
+      visualizer.setPreset(targetPreset);
+      isHydratingRef.current = false;
+    }
+
+    if (targetPreset) {
+      const storedParams = storageRef.current.presets?.[targetPreset];
+      const nextParams = buildPresetState(targetPreset, storedParams);
+      isHydratingRef.current = true;
+      visualizer.setParams(nextParams);
+      isHydratingRef.current = false;
+    }
+
+    setParams(visualizer.getParams());
     setPresetId(visualizer.getParams().preset ?? null);
 
     const unsubscribeParams = visualizer.on("params", ({ params: nextParams }) => {
       setParams(nextParams as Record<string, any>);
+      if (isHydratingRef.current) return;
+      const activePreset = (nextParams as Record<string, any>).preset as string | undefined;
+      if (!activePreset) return;
+      const nextStorage: VisualizerStorage = {
+        activePreset,
+        presets: {
+          ...(storageRef.current.presets ?? {}),
+          [activePreset]: nextParams as Record<string, any>
+        }
+      };
+      storageRef.current = nextStorage;
+      writeVisualizerStorage(nextStorage);
     });
     const unsubscribePreset = visualizer.on("preset", ({ id }) => {
       setPresetId(id);
-      setParams(visualizer.getParams() as Record<string, any>);
+      const storedParams = storageRef.current.presets?.[id];
+      const nextParams = buildPresetState(id, storedParams);
+      isHydratingRef.current = true;
+      visualizer.setParams(nextParams);
+      isHydratingRef.current = false;
     });
 
     return () => {
@@ -99,28 +205,6 @@ export function LoungePanel({ visualizer }: LoungePanelProps) {
       unsubscribePreset?.();
     };
   }, [visualizer]);
-
-  useEffect(() => {
-    if (!audioEl) return undefined;
-
-    const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
-    audioEl.addEventListener("play", handlePlay);
-    audioEl.addEventListener("pause", handlePause);
-    audioEl.addEventListener("ended", handlePause);
-
-    return () => {
-      audioEl.removeEventListener("play", handlePlay);
-      audioEl.removeEventListener("pause", handlePause);
-      audioEl.removeEventListener("ended", handlePause);
-    };
-  }, [audioEl]);
-
-  useEffect(() => {
-    return () => {
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
-    };
-  }, [audioUrl]);
 
   const activePresetGroup = visualizerGroupForPreset(presetId);
   const groupedSchema = useMemo(() => {
@@ -143,77 +227,6 @@ export function LoungePanel({ visualizer }: LoungePanelProps) {
     return order.map((name) => ({ name, items: groups[name] }));
   }, [schema, activePresetGroup]);
 
-  const ensureAudioConnected = useCallback(async () => {
-    if (!visualizer || !audioEl || audioConnectedRef.current) return;
-    await visualizer.setAudioElement(audioEl);
-    audioConnectedRef.current = true;
-  }, [audioEl, visualizer]);
-
-  const handleAudioFile = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
-      const nextUrl = URL.createObjectURL(file);
-      setAudioUrl(nextUrl);
-      setTrackName(file.name.replace(/\.[^/.]+$/, ""));
-      setIsPlaying(false);
-      setAudioSource("file");
-
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach((track) => track.stop());
-        micStreamRef.current = null;
-        audioConnectedRef.current = false;
-      }
-    },
-    [audioUrl]
-  );
-
-  const togglePlay = useCallback(async () => {
-    if (!audioEl) return;
-    await ensureAudioConnected();
-
-    if (audioEl.paused) {
-      await audioEl.play();
-    } else {
-      audioEl.pause();
-    }
-  }, [audioEl, ensureAudioConnected]);
-
-  const stopAudio = useCallback(() => {
-    if (!audioEl) return;
-    audioEl.pause();
-    audioEl.currentTime = 0;
-  }, [audioEl]);
-
-  const toggleMic = useCallback(async () => {
-    if (!visualizer) return;
-
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
-      audioConnectedRef.current = false;
-      setIsPlaying(Boolean(audioEl && !audioEl.paused));
-      setAudioSource(audioUrl ? "file" : "none");
-      return;
-    }
-
-    try {
-      if (audioEl) {
-        audioEl.pause();
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      await visualizer.setMicStream(stream);
-      micStreamRef.current = stream;
-      audioConnectedRef.current = false;
-      setAudioSource("mic");
-      setIsPlaying(true);
-    } catch (error) {
-      console.error(error);
-    }
-  }, [audioEl, audioUrl, visualizer]);
-
   const updateParam = useCallback(
     (item: ParamSchemaItem, value: any) => {
       visualizer?.setParam(item.path, value);
@@ -228,6 +241,22 @@ export function LoungePanel({ visualizer }: LoungePanelProps) {
     },
     [visualizer]
   );
+
+  const handleResetPreset = useCallback(() => {
+    if (!visualizer || !presetId) return;
+    const defaults = buildPresetDefaults(presetId);
+    isHydratingRef.current = true;
+    visualizer.setParams(defaults);
+    isHydratingRef.current = false;
+    const nextStorage: VisualizerStorage = {
+      ...storageRef.current,
+      activePreset: presetId,
+      presets: { ...(storageRef.current.presets ?? {}) }
+    };
+    delete nextStorage.presets?.[presetId];
+    storageRef.current = nextStorage;
+    writeVisualizerStorage(nextStorage);
+  }, [presetId, visualizer]);
 
   const renderControl = (item: ParamSchemaItem) => {
     const value = getByPath(params, item.path);
@@ -317,42 +346,25 @@ export function LoungePanel({ visualizer }: LoungePanelProps) {
         <Badge className="hudBadge">{trackName}</Badge>
       </PanelHeader>
 
-      <Group>
-        <GroupTitle>Audio</GroupTitle>
-        <Label>
-          Load track
-          <Input type="file" accept="audio/*" onChange={handleAudioFile} />
-        </Label>
-        <div className="hudControlRow">
-          <Button onClick={togglePlay} disabled={!audioUrl || audioSource === "mic"}>
-            {isPlaying ? "Pause" : "Play"}
-          </Button>
-          <Button onClick={stopAudio} disabled={!audioUrl || audioSource === "mic"} variant="ghost">
-            Stop
-          </Button>
-          <Button onClick={toggleMic} variant="ghost">
-            {audioSource === "mic" ? "Mic on" : "Mic"}
-          </Button>
-        </div>
-        <Hint>Pick a file or enable mic input to drive the scene.</Hint>
-        <Status>
-          Source: {audioSource === "file" ? "File" : audioSource === "mic" ? "Mic" : "None"}
-        </Status>
-        <audio ref={handleAudioRef} src={audioUrl || undefined} preload="auto" loop />
-      </Group>
+      <AudioControls />
 
       <Group>
         <GroupTitle>Preset</GroupTitle>
         <Label>
           Visualizer
           <Select value={presetId ?? ""} onChange={handlePresetChange}>
-            {presets.map((preset) => (
+            {presetOptions.map((preset) => (
               <option key={preset.id} value={preset.id}>
                 {preset.label}
               </option>
             ))}
           </Select>
         </Label>
+        <div className="hudControlRow">
+          <Button variant="ghost" onClick={handleResetPreset} disabled={!presetId}>
+            Reset preset
+          </Button>
+        </div>
         <Hint>Switch between neon rings, chrome grid, and particles.</Hint>
       </Group>
 
