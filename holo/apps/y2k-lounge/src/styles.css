@@ -1,10 +1,9 @@
-@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600&display=swap");
-
 :root {
   --lounge-bg: #05070c;
   --lounge-bg-strong: #05070c;
   --lounge-bg-deep: #05060a;
   --lounge-ink: #e9f3ff;
+  --lounge-font: "IBM Plex Mono", "Monaco", "Consolas", "Courier New", monospace;
   --lounge-accent: #47f7d4;
   --lounge-accent-strong: #a0ffe9;
   --lounge-hot: #ffb35c;
@@ -29,8 +28,6 @@
   --lounge-scanline-strong: rgba(255, 255, 255, 0.03);
   --lounge-sidebar-width: 360px;
   --lounge-sidebar-rail: 56px;
-  --lounge-nav-height: 72px;
-  --lounge-nav-collapsed-height: 38px;
 }
 
 body[data-theme="light"] {
@@ -72,7 +69,7 @@ body {
       var(--lounge-bg) 100%
     );
   color: var(--lounge-ink);
-  font-family: "IBM Plex Mono", "Monaco", "Consolas", "Courier New", monospace;
+  font-family: var(--lounge-font);
 }
 
 .loungeApp.ui-app {
@@ -91,15 +88,29 @@ body {
   inset: 0;
   z-index: 0;
   pointer-events: auto;
+  overflow: hidden;
   background: radial-gradient(circle at 70% 20%, var(--lounge-stage-sheen), transparent 55%);
 }
 
-.loungeVisualizer {
+.loungeStageSlot {
+  position: absolute;
+  inset: 0;
+}
+
+.loungeStageCanvas {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
   touch-action: none;
   overscroll-behavior: none;
+  transition: opacity 0.35s ease;
+}
+
+.loungeStageCanvas[data-active="false"] {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .loungeStageGlow {
@@ -128,42 +139,315 @@ body[data-theme="light"] .loungeStageScanlines {
   opacity: 0.22;
 }
 
-.loungeNav {
+.audioDock {
   position: fixed;
   top: 0;
   left: 0;
-  right: 0;
-  height: var(--lounge-nav-height);
-  padding: 10px 18px;
+  width: min(var(--audio-dock-width, 380px), 88vw);
+  transform: translate3d(var(--audio-dock-x, 32px), var(--audio-dock-y, 120px), 0);
+  z-index: 24;
+  pointer-events: auto;
+}
+
+.audioDockSurface {
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  border: 1px solid var(--lounge-edge);
+  background: linear-gradient(160deg, rgba(12, 18, 26, 0.95), rgba(6, 10, 16, 0.9));
+  box-shadow: 0 24px 40px rgba(4, 8, 16, 0.55), inset 0 0 22px rgba(71, 247, 212, 0.12);
+  overflow: hidden;
+}
+
+.audioDockBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  background: linear-gradient(180deg, var(--lounge-nav-strong), var(--lounge-nav));
-  border-bottom: 1px solid var(--lounge-edge);
-  box-shadow: 0 12px 28px rgba(4, 8, 16, 0.65);
-  backdrop-filter: blur(12px);
-  z-index: 20;
-  transition: height 0.35s ease, padding 0.35s ease;
-  animation: loungeDrop 0.6s ease both;
+  gap: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(14, 20, 30, 0.96), rgba(8, 12, 18, 0.9));
+  border-bottom: 1px solid rgba(80, 120, 160, 0.35);
+  cursor: grab;
 }
 
-.loungeNavLeft,
-.loungeNavCenter,
-.loungeNavRight {
+body[data-theme="light"] .audioDockSurface {
+  background: linear-gradient(160deg, rgba(248, 248, 244, 0.96), rgba(228, 232, 238, 0.92));
+  box-shadow: 0 18px 34px rgba(80, 110, 140, 0.25);
+}
+
+body[data-theme="light"] .audioDockBar {
+  background: linear-gradient(180deg, rgba(248, 248, 244, 0.98), rgba(234, 236, 242, 0.94));
+}
+
+body[data-theme="light"] .audioDockVisualizer {
+  background: radial-gradient(circle at 70% 20%, rgba(47, 141, 228, 0.18), transparent 55%);
+}
+
+body[data-theme="light"] .audioDockTab {
+  background: linear-gradient(160deg, rgba(248, 248, 244, 0.98), rgba(230, 234, 240, 0.94));
+  box-shadow: 0 14px 22px rgba(120, 140, 170, 0.2);
+}
+
+body[data-theme="light"] .audioDockResizeHandle {
+  background: rgba(240, 242, 246, 0.85);
+  border-color: rgba(120, 150, 190, 0.6);
+  box-shadow: inset 0 0 10px rgba(47, 141, 228, 0.18);
+}
+
+.audioDockBar:active {
+  cursor: grabbing;
+}
+
+.audioDockBarLeft {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.audioDockIndicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(120, 160, 200, 0.5);
+  box-shadow: none;
+}
+
+.audioDockIndicator[data-state="live"] {
+  background: var(--lounge-accent);
+  box-shadow: none;
+}
+
+.audioDockTitle {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--lounge-ink);
+}
+
+.audioDockTrack {
+  font-size: 10px;
+  color: var(--lounge-sidebar-muted);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audioDockBarRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audioDockAction {
+  padding: 6px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audioDockActionIcon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+}
+
+.audioDockActionIcon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.audioDockVisualizer {
+  position: relative;
+  min-height: 150px;
+  height: var(--audio-dock-visualizer-height, 200px);
+  background: radial-gradient(circle at 70% 20%, rgba(71, 247, 212, 0.18), transparent 55%);
+  border-bottom: 1px solid rgba(80, 120, 160, 0.35);
+  touch-action: none;
+}
+
+.audioDockCanvasSlot {
+  position: absolute;
+  inset: 0;
+}
+
+.audioDockVisualizer .loungeStageCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.audioDockOverlay {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(180deg, var(--lounge-scanline) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, var(--lounge-scanline-strong) 0 1px, transparent 1px 6px);
+  opacity: 0.3;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.audioDockResizeHandle {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 160, 200, 0.6);
+  background: rgba(10, 14, 20, 0.6);
+  box-shadow: inset 0 0 10px rgba(71, 247, 212, 0.2);
+  cursor: nwse-resize;
+}
+
+.audioDockResizeHandle::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-right: 2px solid rgba(160, 210, 255, 0.7);
+  border-bottom: 2px solid rgba(160, 210, 255, 0.7);
+}
+
+body[data-theme="light"] .audioDockOverlay {
+  mix-blend-mode: multiply;
+  opacity: 0.2;
+}
+
+.audioDockControls {
+  padding: 12px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.audioDockControls .ui-group {
+  background: var(--lounge-hud-group);
+}
+
+.audioDock[data-controls="collapsed"] .audioDockControls {
+  display: none;
+}
+
+.audioDock[data-controls="collapsed"] .audioDockVisualizer {
+  border-bottom: none;
+}
+
+.audioDockTab {
+  position: absolute;
+  left: -8px;
+  top: 0;
+  width: 52px;
+  height: 56px;
+  border-radius: 0 14px 14px 0;
+  border: 1px solid var(--lounge-edge);
+  background: linear-gradient(160deg, rgba(14, 20, 32, 0.96), rgba(8, 12, 18, 0.92));
+  box-shadow: 0 16px 26px rgba(4, 8, 16, 0.5);
+  color: var(--lounge-ink);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.audioDockTabIcon {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+}
+
+.audioDockTabIcon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.audioDock[data-mode="minimized"] {
+  width: 56px;
+  height: 56px;
+  transform: translate3d(0, var(--audio-dock-y, 120px), 0);
+}
+
+.audioDock[data-mode="minimized"] .audioDockSurface {
+  display: none;
+}
+
+.audioDock[data-mode="minimized"] .audioDockTab {
+  display: inline-flex;
+}
+
+.audioDock[data-mode="floating"] .audioDockTab,
+.audioDock[data-mode="docked"] .audioDockTab {
+  display: none;
+}
+
+.audioDock[data-mode="docked"] {
+  inset: 0;
+  width: auto;
+  height: auto;
+  transform: none;
+  z-index: 4;
+}
+
+.audioDock[data-mode="docked"] .audioDockSurface {
+  position: absolute;
+  inset: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.audioDock[data-mode="docked"] .audioDockBar,
+.audioDock[data-mode="docked"] .audioDockControls {
+  display: none;
+}
+
+.audioDock[data-mode="docked"] .audioDockVisualizer {
+  min-height: 100%;
+  height: 100%;
+  border: none;
+}
+
+.audioDock[data-mode="docked"] .audioDockResizeHandle {
+  display: none;
+}
+
+.audioDock[data-mode="docked"] .audioDockOverlay {
+  opacity: 0.4;
+}
+
+@media (max-width: 720px) {
+  .audioDock {
+    width: min(92vw, 360px);
+  }
+
+  .audioDockVisualizer {
+    min-height: 160px;
+  }
+
+  .audioDockControls {
+    max-height: 45vh;
+  }
 }
 
 .loungeBrand {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-family: "Orbitron", "IBM Plex Mono", monospace;
   text-transform: uppercase;
   letter-spacing: 0.24em;
   font-size: 12px;
+}
+
+.loungeBrandBadge {
+  position: fixed;
+  top: 22px;
+  left: 18px;
+  z-index: 28;
+  pointer-events: none;
 }
 
 .brandMark {
@@ -172,6 +456,7 @@ body[data-theme="light"] .loungeStageScanlines {
   padding: 4px 6px;
   border-radius: 4px;
   font-weight: 700;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .brandText {
@@ -186,88 +471,17 @@ body[data-theme="light"] .loungeStageScanlines {
   border-color: rgba(125, 190, 210, 0.6);
 }
 
-.loungeNavCenter {
-  flex: 1;
-  justify-content: center;
-  min-width: 0;
-}
-
-.loungeNavItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  border-color: rgba(80, 110, 150, 0.7);
-  background: rgba(15, 22, 32, 0.8);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-body[data-theme="light"] .loungeNavItem {
-  border-color: rgba(110, 130, 160, 0.6);
-  background: rgba(245, 248, 252, 0.8);
-}
-
-.loungeNavItem.isActive {
-  box-shadow: 0 0 0 1px rgba(160, 255, 233, 0.3), 0 0 12px rgba(71, 247, 212, 0.35);
-}
-
-body[data-theme="light"] .loungeNavItem.isActive {
-  box-shadow: 0 0 0 1px rgba(80, 120, 170, 0.3), 0 0 12px rgba(47, 141, 228, 0.2);
-}
-
-.loungeNavItem:hover {
-  transform: translateY(-1px);
-}
-
-.navIcon {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-}
-
-.navIcon svg {
-  width: 100%;
-  height: 100%;
-}
-
-.navLabel {
-  white-space: nowrap;
-}
-
-.navControl {
-  padding: 6px;
-  width: 36px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.navControlIcon {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-}
-
-.navControlIcon svg {
-  width: 100%;
-  height: 100%;
-}
-
 .loungeSidebar {
   position: fixed;
-  top: var(--lounge-nav-height);
+  top: 0;
   right: 0;
   width: var(--lounge-sidebar-width);
-  height: calc(100% - var(--lounge-nav-height));
+  height: 100%;
   background: var(--lounge-panel);
   border-left: 1px solid var(--lounge-edge);
   box-shadow: -10px 0 26px rgba(4, 8, 16, 0.55);
   backdrop-filter: blur(14px);
-  z-index: 15;
+  z-index: 26;
   transition:
     width 0.5s cubic-bezier(0.32, 0.72, 0.17, 1),
     box-shadow 0.45s ease,
@@ -275,9 +489,53 @@ body[data-theme="light"] .loungeNavItem.isActive {
   animation: loungeSlide 0.65s ease both;
 }
 
+.loungeApp[data-resizing="true"] .loungeSidebar {
+  transition: none;
+}
+
+.loungeSidebarResize {
+  position: absolute;
+  top: 0;
+  left: -6px;
+  width: 12px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.loungeSidebarResize::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(71, 247, 212, 0.4);
+  opacity: 0;
+  transform: scaleY(0.6);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.loungeSidebarResize:hover::after,
+.loungeSidebarResize:active::after {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+body[data-theme="light"] .loungeSidebarResize::after {
+  background: rgba(47, 141, 228, 0.45);
+}
+
 .loungeApp[data-sidebar="closed"] .loungeSidebar {
   width: var(--lounge-sidebar-rail);
   box-shadow: none;
+}
+
+.loungeApp[data-sidebar="closed"] .loungeSidebarResize {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .loungeSidebarInner {
@@ -288,9 +546,10 @@ body[data-theme="light"] .loungeNavItem.isActive {
 
 .loungeSidebarHeader {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 16px 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 16px 16px 12px;
   background: linear-gradient(
     180deg,
     var(--lounge-sidebar-header),
@@ -300,28 +559,20 @@ body[data-theme="light"] .loungeNavItem.isActive {
 }
 
 .loungeApp[data-sidebar="closed"] .loungeSidebarHeader {
-  justify-content: flex-start;
-  padding: 12px 12px 10px 6px;
+  align-items: center;
+  padding: 12px 10px 10px;
+  gap: 10px;
 }
 
-.sidebarInfo {
+.sidebarHeaderTop {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.sidebarTitle {
-  font-family: "IBM Plex Mono", "Monaco", "Consolas", "Courier New", monospace;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  font-size: 12px;
-}
-
-.sidebarSubtitle {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  color: var(--lounge-sidebar-muted);
+.loungeApp[data-sidebar="closed"] .sidebarHeaderTop {
+  justify-content: center;
 }
 
 .sidebarToggle {
@@ -331,6 +582,180 @@ body[data-theme="light"] .loungeNavItem.isActive {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.sidebarControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.sidebarThemeToggle {
+  padding: 6px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebarControlIcon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+.sidebarControlIcon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.sidebarTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  position: relative;
+  padding-bottom: 8px;
+}
+
+.sidebarTabs::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  height: 1px;
+  background: var(--lounge-hud-border);
+}
+
+.sidebarTab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  min-height: 40px;
+  border-radius: 10px 10px 0 0;
+  border: 1px solid var(--lounge-hud-border);
+  border-bottom: 0;
+  background: linear-gradient(180deg, rgba(18, 24, 34, 0.96), rgba(10, 14, 20, 0.94));
+  color: var(--lounge-ink);
+  appearance: none;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.18),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.65);
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease,
+    padding 0.2s ease, gap 0.2s ease, margin 0.2s ease, border-radius 0.2s ease;
+  margin-bottom: -5px;
+}
+
+.sidebarTab:not(.isActive) {
+  color: var(--lounge-sidebar-muted);
+  transform: none;
+  justify-content: center;
+  gap: 0;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.sidebarTabLabel {
+  display: inline-block;
+  max-width: 160px;
+  opacity: 1;
+  transform: translateX(0);
+  transition: max-width 0.25s ease, opacity 0.2s ease, transform 0.25s ease;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sidebarTab:not(.isActive) .sidebarTabLabel {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(-6px);
+}
+
+.sidebarTab:hover {
+  background: linear-gradient(180deg, rgba(26, 34, 46, 0.98), rgba(12, 18, 26, 0.96));
+}
+
+.sidebarTab.isActive {
+  z-index: 1;
+  border-color: rgba(120, 160, 200, 0.65);
+  background: linear-gradient(180deg, rgba(12, 18, 26, 0.98), rgba(8, 12, 18, 0.96));
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.72);
+  transform: translateY(0);
+  color: var(--lounge-ink);
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+.sidebarTabIcon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+}
+
+.sidebarTabIcon svg {
+  width: 100%;
+  height: 100%;
+}
+
+body[data-theme="light"] .sidebarTab {
+  border-color: var(--lounge-hud-border);
+  background: linear-gradient(180deg, rgba(246, 248, 252, 0.98), rgba(228, 234, 242, 0.94));
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.95),
+    inset -1px -1px 0 rgba(150, 160, 175, 0.55);
+}
+
+body[data-theme="light"] .sidebarTab:hover {
+  background: linear-gradient(180deg, rgba(252, 254, 255, 0.98), rgba(236, 242, 250, 0.95));
+}
+
+body[data-theme="light"] .sidebarTab.isActive {
+  border-color: rgba(120, 140, 160, 0.7);
+  background: linear-gradient(180deg, rgba(236, 242, 250, 0.98), rgba(220, 228, 238, 0.96));
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.92),
+    inset -1px -1px 0 rgba(140, 150, 165, 0.6);
+}
+
+.loungeApp[data-sidebar="closed"] .sidebarTabs {
+  flex-direction: column;
+  align-items: center;
+}
+
+.loungeApp[data-sidebar="closed"] .sidebarTabs::after {
+  display: none;
+}
+
+.loungeApp[data-sidebar="closed"] .sidebarTabLabel {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(-6px);
+  pointer-events: none;
+}
+
+.loungeApp[data-sidebar="closed"] .sidebarTab {
+  padding: 8px;
+  margin-bottom: 0;
+  border-radius: 10px;
+  border-bottom: 1px solid var(--lounge-hud-border);
+  transform: none;
+  justify-content: center;
+  gap: 0;
+}
+
+.loungeApp[data-sidebar="closed"] .sidebarTab:not(.isActive) {
+  transform: none;
+}
+
+.loungeApp[data-sidebar="closed"] .sidebarControls {
+  flex-direction: column;
 }
 
 .toggleIcon {
@@ -359,16 +784,10 @@ body[data-theme="light"] .loungeNavItem.isActive {
   transition: opacity 0.3s ease, transform 0.4s ease;
 }
 
-.loungeApp[data-sidebar="closed"] .loungeSidebarScroll,
-.loungeApp[data-sidebar="closed"] .sidebarInfo,
-.loungeApp[data-sidebar="closed"] .sidebarSubtitle {
+.loungeApp[data-sidebar="closed"] .loungeSidebarScroll {
   opacity: 0;
   transform: translateX(10px);
   pointer-events: none;
-}
-
-.loungeApp[data-sidebar="closed"] .sidebarInfo {
-  display: none;
 }
 
 .hudPanel {
@@ -378,7 +797,7 @@ body[data-theme="light"] .loungeNavItem.isActive {
 }
 
 .hudPanel .ui-panel-title {
-  font-family: "IBM Plex Mono", "Monaco", "Consolas", "Courier New", monospace;
+  font-family: inherit;
   font-size: 11px;
   color: var(--lounge-accent-strong);
 }
@@ -391,6 +810,10 @@ body[data-theme="light"] .loungeNavItem.isActive {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.hudPage[data-active="false"] {
+  display: none;
 }
 
 .hudPipelineGrid {
@@ -437,11 +860,12 @@ body[data-theme="light"] .hudPipelineStage {
 .hudSourceToggle {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--lounge-edge);
+  border: 2px solid var(--lounge-edge);
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(6, 10, 16, 0.55);
-  box-shadow: inset 0 0 12px rgba(71, 247, 212, 0.08);
+  background: rgba(6, 10, 16, 0.6);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.45);
 }
 
 body[data-theme="light"] .hudSourceToggle {
@@ -461,16 +885,16 @@ body[data-theme="light"] .hudSourceToggle {
 }
 
 .hudSourceButton + .hudSourceButton {
-  border-left: 1px solid var(--lounge-edge);
+  border-left: 2px solid var(--lounge-edge);
 }
 
 .hudSourceButton[data-active="true"] {
   color: var(--lounge-ink);
-  background: linear-gradient(180deg, rgba(71, 247, 212, 0.3), rgba(71, 247, 212, 0.08));
+  background: linear-gradient(180deg, rgba(40, 54, 66, 0.92), rgba(24, 32, 44, 0.86));
 }
 
 body[data-theme="light"] .hudSourceButton[data-active="true"] {
-  background: linear-gradient(180deg, rgba(47, 141, 228, 0.25), rgba(47, 141, 228, 0.08));
+  background: linear-gradient(180deg, rgba(226, 236, 246, 0.98), rgba(210, 222, 236, 0.92));
 }
 
 .hudSourceButton:disabled {
@@ -643,32 +1067,15 @@ body[data-theme="light"] .hudArtifactPlaceholder {
   :root {
     --lounge-sidebar-width: 320px;
   }
-
-  .loungeNavCenter {
-    justify-content: flex-start;
-    overflow-x: auto;
-  }
 }
 
 @media (max-width: 760px) {
   :root {
     --lounge-sidebar-width: min(90vw, 320px);
-    --lounge-nav-height: 64px;
   }
 
-  .loungeNav {
-    flex-wrap: wrap;
-    padding: 8px 12px;
-  }
-
-  .loungeNavCenter {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .loungeNavRight {
-    width: 100%;
-    justify-content: space-between;
+  .loungeSidebarResize {
+    display: none;
   }
 
   .hudViewerFrame {
