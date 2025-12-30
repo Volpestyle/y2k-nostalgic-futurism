@@ -47,7 +47,9 @@ class _LocalStageRunner:
         self._handler = handler
 
     def run(self, request: StageRequest) -> StageResult:
-        return self._handler(request)
+        result = self._handler(request)
+        result.metadata.setdefault("runner", "local")
+        return result
 
 
 def _run_cutout_local(request: StageRequest) -> StageResult:
@@ -77,7 +79,10 @@ def _run_cutout_local(request: StageRequest) -> StageResult:
     rgba = apply_mask_to_rgba(image, mask_image, feather_px=feather)
     _ensure_parent(request.output.path)
     rgba.save(request.output.path, format="PNG")
-    return StageResult(output=request.output, metadata={"model": spec.id, "hf_repo": spec.hf_repo})
+    return StageResult(
+        output=request.output,
+        metadata={"model": spec.id, "hf_repo": spec.hf_repo, "feather_px": feather},
+    )
 
 
 def _run_views_local(request: StageRequest) -> StageResult:
@@ -88,6 +93,12 @@ def _run_views_local(request: StageRequest) -> StageResult:
 
     input_rgba = Image.open(request.input.path).convert("RGBA")
     view_count = _coerce_int(request.config.get("count"), 12)
+    if view_count <= 0:
+        raise ValueError("views stage requires count >= 1")
+    include_original = _coerce_bool(
+        _get_first_present(request.config, ("includeOriginal", "include_original")),
+        True,
+    )
     elev_deg = _coerce_float(
         request.config.get("elevDeg") or request.config.get("elev"),
         10.0,
@@ -113,14 +124,20 @@ def _run_views_local(request: StageRequest) -> StageResult:
         raise RuntimeError("depth pipeline returned no predicted_depth for view synthesis")
     depth = np.array(predicted, dtype=np.float32)
 
+    width, height = rgb.size
+    if depth.shape[:2] != (height, width):
+        depth = _resize_depth_map(depth, width, height)
+
     alpha = np.array(resized_rgba.getchannel("A"), dtype=np.float32)
     depth[alpha < 5] = 0.0
 
     depth_norm = _normalize_depth_relative(depth)
+    depth_invert = _resolve_depth_invert(request.config, depth_spec)
+    if depth_invert:
+        depth_norm = 1.0 - depth_norm
+        depth_norm[depth <= 0] = 0.0
     depth_m = _depth_range_from_normalized(depth_norm, _DEFAULT_DEPTH_NEAR, _DEFAULT_DEPTH_FAR)
     depth_m[depth <= 0] = 0.0
-
-    width, height = rgb.size
     fx, fy, cx, cy = _intrinsics_from_fov(width, height, fov_deg)
     points, colors = _depth_to_points(depth_m, rgb, fx, fy, cx, cy)
     if points.size == 0:
@@ -129,14 +146,44 @@ def _run_views_local(request: StageRequest) -> StageResult:
     points = points - center
 
     radius = float(np.linalg.norm(points, axis=1).max() * 1.6)
-    poses = _generate_camera_poses(view_count, elev_deg, radius, seed)
+    offset = 1 if include_original else 0
+    generate_count = view_count - offset
+    poses = _generate_camera_poses(generate_count, elev_deg, radius, seed)
 
     views_dir = request.output.path.parent / "views"
     views_dir.mkdir(parents=True, exist_ok=True)
 
     views: List[dict] = []
+    if include_original:
+        view_id = "view_000"
+        image_path = (views_dir / f"{view_id}.png").resolve()
+        depth_path = (views_dir / f"{view_id}.npy").resolve()
+        rgb.save(image_path, format="PNG")
+        np.save(depth_path, depth_m.astype(np.float32))
+        depth_min, depth_max = _depth_min_max(depth_m)
+        pose = np.eye(4, dtype=np.float64)
+        pose[:3, 3] = -center
+        views.append(
+            {
+                "id": view_id,
+                "image_path": str(image_path),
+                "depth_path": str(depth_path),
+                "depth_min": depth_min,
+                "depth_max": depth_max,
+                "pose": _serialize_matrix(pose),
+                "intrinsics": {
+                    "fx": fx,
+                    "fy": fy,
+                    "cx": cx,
+                    "cy": cy,
+                },
+                "width": width,
+                "height": height,
+            }
+        )
+
     for idx, pose in enumerate(poses):
-        view_id = f"view_{idx:03d}"
+        view_id = f"view_{idx + offset:03d}"
         color, depth_view = _rasterize(points, colors, width, height, fx, fy, cx, cy, pose)
         image_path = (views_dir / f"{view_id}.png").resolve()
         depth_path = (views_dir / f"{view_id}.npy").resolve()
@@ -167,17 +214,37 @@ def _run_views_local(request: StageRequest) -> StageResult:
         "fov_deg": fov_deg,
         "depth_model": depth_spec.id,
         "resolution": resolution,
+        "depth_mode": "metric",
         "views": views,
     }
     _ensure_parent(request.output.path)
     request.output.path.write_text(json.dumps(manifest, indent=2))
-    return StageResult(output=request.output, metadata={"views": view_count, "mode": "reproject"})
+    return StageResult(
+        output=request.output,
+        metadata={
+            "views": view_count,
+            "mode": "reproject",
+            "depth_model": depth_spec.id,
+            "fov_deg": fov_deg,
+            "elev_deg": elev_deg,
+            "include_original": include_original,
+            "resolution": resolution,
+            "depth_near": _DEFAULT_DEPTH_NEAR,
+            "depth_far": _DEFAULT_DEPTH_FAR,
+        },
+    )
 
 
 def _run_views_local_model(request: StageRequest, model_id: str) -> StageResult:
     _require_local_models()
     input_rgb = Image.open(request.input.path).convert("RGB")
     view_count = _coerce_int(request.config.get("count"), 12)
+    if view_count <= 0:
+        raise ValueError("views stage requires count >= 1")
+    include_original = _coerce_bool(
+        _get_first_present(request.config, ("includeOriginal", "include_original")),
+        True,
+    )
     elev_deg = _coerce_float(
         request.config.get("elevDeg") or request.config.get("elev"),
         10.0,
@@ -207,10 +274,35 @@ def _run_views_local_model(request: StageRequest, model_id: str) -> StageResult:
     views_dir = request.output.path.parent / "views"
     views_dir.mkdir(parents=True, exist_ok=True)
 
+    offset = 1 if include_original else 0
+    step_deg = 360.0 / view_count
     views: List[dict] = []
-    for idx in range(view_count):
-        view_id = f"view_{idx:03d}"
-        az_deg = start + (360.0 * idx / view_count)
+    if include_original:
+        view_id = "view_000"
+        image_path = (views_dir / f"{view_id}.png").resolve()
+        input_rgb.save(image_path, format="PNG")
+        az_deg = start
+        fx, fy, cx, cy = _intrinsics_from_fov(width, height, fov_deg)
+        pose = _pose_from_spherical(az_deg, elev_deg, radius)
+        views.append(
+            {
+                "id": view_id,
+                "image_path": str(image_path),
+                "pose": _serialize_matrix(pose),
+                "intrinsics": {
+                    "fx": fx,
+                    "fy": fy,
+                    "cx": cx,
+                    "cy": cy,
+                },
+                "width": width,
+                "height": height,
+            }
+        )
+
+    for idx in range(view_count - offset):
+        view_id = f"view_{idx + offset:03d}"
+        az_deg = start + (step_deg * (idx + offset))
         view_image = pipeline.generate(
             input_rgb,
             azimuth_deg=az_deg,
@@ -255,7 +347,18 @@ def _run_views_local_model(request: StageRequest, model_id: str) -> StageResult:
     request.output.path.write_text(json.dumps(manifest, indent=2))
     return StageResult(
         output=request.output,
-        metadata={"views": view_count, "mode": "novel-view", "model": spec.id},
+        metadata={
+            "views": view_count,
+            "mode": "novel-view",
+            "model": spec.id,
+            "fov_deg": fov_deg,
+            "elev_deg": elev_deg,
+            "include_original": include_original,
+            "resolution": resolution,
+            "steps": steps,
+            "guidance_scale": guidance_scale,
+            "seed": seed,
+        },
     )
 
 
@@ -271,9 +374,25 @@ def _run_depth_local(request: StageRequest) -> StageResult:
     requested_model = str(request.config.get("model") or "").strip()
     if _views_have_depth(views) and (not requested_model or requested_model == depth_model_hint):
         manifest["views"] = _ensure_view_intrinsics(views, fov_deg)
+        depth_mode_reuse = _normalize_depth_mode(
+            _get_first_present(manifest, ("depth_mode", "depthMode")),
+            default="relative",
+        )
+        depth_invert_reuse = _coerce_bool(
+            _get_first_present(manifest, ("depth_invert", "depthInvert")),
+            False,
+        )
         _ensure_parent(request.output.path)
         request.output.path.write_text(json.dumps(manifest, indent=2))
-        return StageResult(output=request.output, metadata={"mode": "reuse"})
+        return StageResult(
+            output=request.output,
+            metadata={
+                "mode": "reuse",
+                "depth_mode": depth_mode_reuse,
+                "depth_invert": depth_invert_reuse,
+                "views": len(views),
+            },
+        )
 
     model_id = str(request.config.get("model") or "").strip() or None
     spec = _resolve_local_model("depth-estimation", model_id)
@@ -282,6 +401,11 @@ def _run_depth_local(request: StageRequest) -> StageResult:
         request.config.get("resolution") or request.config.get("res"),
         _DEFAULT_VIEW_RESOLUTION,
     )
+    depth_mode = _normalize_depth_mode(
+        _get_first_present(request.config, ("depthMode", "depth_mode")),
+        default="relative",
+    )
+    depth_invert = _resolve_depth_invert(request.config, spec)
 
     depth_dir = request.output.path.parent / "depth"
     depth_dir.mkdir(parents=True, exist_ok=True)
@@ -307,6 +431,8 @@ def _run_depth_local(request: StageRequest) -> StageResult:
         if predicted is None:
             raise RuntimeError("depth pipeline returned no predicted_depth")
         depth = np.array(predicted, dtype=np.float32)
+        if depth.shape[:2] != (height, width):
+            depth = _resize_depth_map(depth, width, height)
         depth_path = (depth_dir / f"{view_id}.npy").resolve()
         np.save(depth_path, depth)
         depth_min, depth_max = _depth_min_max(depth)
@@ -319,6 +445,8 @@ def _run_depth_local(request: StageRequest) -> StageResult:
                 "depth_path": str(depth_path),
                 "depth_min": depth_min,
                 "depth_max": depth_max,
+                "depth_mode": depth_mode,
+                "depth_invert": depth_invert,
                 "intrinsics": {
                     "fx": fx,
                     "fy": fy,
@@ -334,9 +462,21 @@ def _run_depth_local(request: StageRequest) -> StageResult:
     output_manifest = dict(manifest)
     output_manifest["version"] = _VIEW_MANIFEST_VERSION
     output_manifest["views"] = updated_views
+    output_manifest["depth_mode"] = depth_mode
+    output_manifest["depth_invert"] = depth_invert
     _ensure_parent(request.output.path)
     request.output.path.write_text(json.dumps(output_manifest, indent=2))
-    return StageResult(output=request.output, metadata={"model": spec.id, "hf_repo": spec.hf_repo})
+    return StageResult(
+        output=request.output,
+        metadata={
+            "model": spec.id,
+            "hf_repo": spec.hf_repo,
+            "depth_mode": depth_mode,
+            "depth_invert": depth_invert,
+            "resolution": resolution,
+            "views": len(updated_views),
+        },
+    )
 
 
 def _run_recon_local(request: StageRequest) -> StageResult:
@@ -356,6 +496,40 @@ def _run_recon_local(request: StageRequest) -> StageResult:
     depth_far = max(_DEFAULT_DEPTH_FAR, voxel_size * 200.0)
     depth_near = max(_DEFAULT_DEPTH_NEAR, depth_far * 0.2)
 
+    depth_mode_override = _get_first_present(request.config, ("depthMode", "depth_mode"))
+    if depth_mode_override is None:
+        depth_mode_default = _normalize_depth_mode(
+            _get_first_present(manifest, ("depth_mode", "depthMode")) or "relative",
+        )
+    else:
+        depth_mode_default = _normalize_depth_mode(depth_mode_override)
+
+    depth_invert_override = _get_first_present(request.config, ("depthInvert", "invertDepth", "depth_invert"))
+    depth_invert_default = _coerce_bool(
+        _get_first_present(manifest, ("depth_invert", "depthInvert")),
+        False,
+    )
+    depth_invert_resolved = (
+        _coerce_bool(depth_invert_override, depth_invert_default)
+        if depth_invert_override is not None
+        else depth_invert_default
+    )
+
+    if depth_mode_override is None:
+        relative_views = [
+            view
+            for view in views
+            if _normalize_depth_mode(
+                _get_first_present(view, ("depth_mode", "depthMode")) or depth_mode_default
+            )
+            != "metric"
+        ]
+    else:
+        relative_views = views if depth_mode_default != "metric" else []
+
+    depth_quantiles = _depth_quantiles_from_views(relative_views)
+    depth_global_min, depth_global_max = depth_quantiles if depth_quantiles else (None, None)
+
     merged = o3d.geometry.PointCloud()
     for view in views:
         image_path_raw = str(view.get("image_path") or view.get("image") or "").strip()
@@ -369,16 +543,50 @@ def _run_recon_local(request: StageRequest) -> StageResult:
         if not depth_path.exists():
             raise RuntimeError(f"view depth not found: {depth_path}")
         color = o3d.io.read_image(str(image_path))
-        depth_raw = np.load(depth_path).astype(np.float32)
-        depth_min = _coerce_float(view.get("depth_min"), float(np.min(depth_raw)))
-        depth_max = _coerce_float(view.get("depth_max"), float(np.max(depth_raw)))
-        depth_norm = _normalize_depth_relative(depth_raw, depth_min, depth_max)
-        depth_m = _depth_range_from_normalized(depth_norm, depth_near, depth_far)
-        depth_m[depth_raw <= 0] = 0.0
-        depth_o3d = o3d.geometry.Image(depth_m.astype(np.float32))
+        color_np = np.asarray(color)
+        color_height, color_width = color_np.shape[:2]
 
-        width = int(view.get("width") or depth_m.shape[1])
-        height = int(view.get("height") or depth_m.shape[0])
+        depth_raw = np.load(depth_path).astype(np.float32)
+        if depth_mode_override is None:
+            view_depth_mode = _normalize_depth_mode(
+                _get_first_present(view, ("depth_mode", "depthMode")) or depth_mode_default
+            )
+        else:
+            view_depth_mode = depth_mode_default
+
+        if view_depth_mode == "metric":
+            depth_m = depth_raw.astype(np.float32)
+        else:
+            if depth_global_min is None or depth_global_max is None:
+                depth_min = _coerce_float(view.get("depth_min"), float(np.min(depth_raw)))
+                depth_max = _coerce_float(view.get("depth_max"), float(np.max(depth_raw)))
+                depth_norm = _normalize_depth_relative(depth_raw, depth_min, depth_max)
+            else:
+                depth_norm = _normalize_depth_relative(depth_raw, depth_global_min, depth_global_max)
+            if depth_invert_override is None:
+                invert = _coerce_bool(
+                    _get_first_present(view, ("depth_invert", "depthInvert", "invert_depth")),
+                    depth_invert_default,
+                )
+            else:
+                invert = _coerce_bool(depth_invert_override, depth_invert_default)
+            if invert:
+                depth_norm = 1.0 - depth_norm
+                depth_norm[depth_raw <= 0] = 0.0
+            depth_m = _depth_range_from_normalized(depth_norm, depth_near, depth_far)
+
+        depth_m[depth_raw <= 0] = 0.0
+
+        width = int(view.get("width") or color_width)
+        height = int(view.get("height") or color_height)
+        if width != color_width or height != color_height:
+            width = color_width
+            height = color_height
+
+        if depth_m.shape[:2] != (height, width):
+            depth_m = _resize_depth_map(depth_m, width, height)
+
+        depth_o3d = o3d.geometry.Image(depth_m.astype(np.float32))
         intrinsics = view.get("intrinsics") or {}
         fx_default, fy_default, cx_default, cy_default = _intrinsics_from_fov(width, height, fov_deg)
         fx = _coerce_float(intrinsics.get("fx"), fx_default)
@@ -410,6 +618,25 @@ def _run_recon_local(request: StageRequest) -> StageResult:
     )
     merged.orient_normals_consistent_tangent_plane(10)
 
+    points_cfg = request.config.get("points") if isinstance(request.config, dict) else None
+    points_enabled = False
+    points_voxel = 0.0
+    points_max = 0
+    if isinstance(points_cfg, dict):
+        points_enabled = bool(points_cfg.get("enabled"))
+        points_voxel = _coerce_float(points_cfg.get("voxelSize"), 0.0)
+        points_max = _coerce_int(points_cfg.get("maxPoints"), 0)
+
+    if points_enabled:
+        points_cloud = merged
+        if points_voxel > 0:
+            points_cloud = points_cloud.voxel_down_sample(points_voxel)
+        if points_max > 0 and len(points_cloud.points) > points_max:
+            ratio = max(0.0, min(1.0, points_max / max(len(points_cloud.points), 1)))
+            points_cloud = points_cloud.random_down_sample(ratio)
+        points_path = request.output.path.parent / "points.ply"
+        o3d.io.write_point_cloud(str(points_path), points_cloud)
+
     if method in ("alpha", "alpha-shape"):
         alpha = max(voxel_size * 8.0, 0.02)
         mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(merged, alpha)
@@ -422,8 +649,8 @@ def _run_recon_local(request: StageRequest) -> StageResult:
         densities = np.asarray(densities)
         if densities.size:
             threshold = float(np.quantile(densities, 0.02))
-            keep = densities > threshold
-            mesh = mesh.select_by_index(np.where(keep)[0])
+            remove = densities < threshold
+            mesh.remove_vertices_by_mask(remove)
         mesh = mesh.crop(merged.get_axis_aligned_bounding_box())
 
     mesh.remove_degenerate_triangles()
@@ -434,13 +661,26 @@ def _run_recon_local(request: StageRequest) -> StageResult:
 
     _ensure_parent(request.output.path)
     o3d.io.write_triangle_mesh(str(request.output.path), mesh)
-    return StageResult(output=request.output, metadata={"method": method})
+    metadata = {
+        "method": method,
+        "voxel_size": voxel_size,
+        "views": len(views),
+        "depth_mode": depth_mode_default,
+        "depth_invert": depth_invert_resolved,
+        "depth_near": depth_near,
+        "depth_far": depth_far,
+    }
+    if depth_global_min is not None and depth_global_max is not None:
+        metadata["depth_global_min"] = depth_global_min
+        metadata["depth_global_max"] = depth_global_max
+    return StageResult(output=request.output, metadata=metadata)
 
 
 def _run_decimate_local(request: StageRequest) -> StageResult:
     o3d = _require_open3d()
     target_tris = _coerce_int(request.config.get("targetTris"), 2000)
     mesh = o3d.io.read_triangle_mesh(str(request.input.path))
+    input_tris = len(mesh.triangles)
     if target_tris > 0 and len(mesh.triangles) > target_tris:
         mesh = mesh.simplify_quadric_decimation(target_tris)
     mesh.remove_degenerate_triangles()
@@ -448,9 +688,17 @@ def _run_decimate_local(request: StageRequest) -> StageResult:
     mesh.remove_duplicated_vertices()
     mesh.remove_non_manifold_edges()
     mesh.compute_vertex_normals()
+    output_tris = len(mesh.triangles)
     _ensure_parent(request.output.path)
     o3d.io.write_triangle_mesh(str(request.output.path), mesh)
-    return StageResult(output=request.output, metadata={"targetTris": target_tris})
+    return StageResult(
+        output=request.output,
+        metadata={
+            "targetTris": target_tris,
+            "input_tris": input_tris,
+            "output_tris": output_tris,
+        },
+    )
 
 
 def _run_export_local(request: StageRequest) -> StageResult:
@@ -465,11 +713,20 @@ def _run_export_local(request: StageRequest) -> StageResult:
     asset_extras = {"ai": {"caption": caption_meta}} if caption_meta else None
 
     if fmt == "glb":
-        data = mesh.export(file_type="glb")
+        export_kwargs = {"file_type": "glb"}
+        if asset_extras:
+            export_kwargs["extras"] = asset_extras
+        try:
+            data = mesh.export(**export_kwargs)
+        except TypeError:
+            data = mesh.export(file_type="glb")
         _ensure_parent(request.output.path)
         request.output.path.write_bytes(data if isinstance(data, (bytes, bytearray)) else bytes(data))
     else:
-        data = mesh.export(file_type="gltf", embed_buffers=True)
+        try:
+            data = mesh.export(file_type="gltf", merge_buffers=True)
+        except TypeError:
+            data = mesh.export(file_type="gltf")
         sidecar_files = None
         if isinstance(data, dict):
             gltf, sidecar_files = _split_gltf_export_files(data)
@@ -542,6 +799,56 @@ def _coerce_float(value: object, default: float) -> float:
         return default
 
 
+def _coerce_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
+def _get_first_present(mapping: object, keys: Iterable[str]) -> object | None:
+    if not isinstance(mapping, dict):
+        return None
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
+def _normalize_depth_mode(value: object, default: str = "relative") -> str:
+    mode = str(value or "").strip().lower()
+    if mode in {"metric", "meters", "absolute"}:
+        return "metric"
+    if mode in {"relative", "normalized", "norm"}:
+        return "relative"
+    return default
+
+
+def _default_depth_invert_for_model(spec: object) -> bool:
+    model_id = str(getattr(spec, "id", "") or "").lower()
+    repo = str(getattr(spec, "hf_repo", "") or "").lower()
+    return "depth-anything" in model_id or "depth-anything" in repo
+
+
+def _resolve_depth_invert(config: object, spec: object) -> bool:
+    default_invert = _default_depth_invert_for_model(spec)
+    if not isinstance(config, dict):
+        return default_invert
+    override = _get_first_present(config, ("depthInvert", "invertDepth", "depth_invert"))
+    if override is None:
+        return default_invert
+    return _coerce_bool(override, default_invert)
+
+
 def _resize_to_max(image: Image.Image, max_dim: int) -> Image.Image:
     if max_dim <= 0:
         return image
@@ -567,6 +874,14 @@ def _resize_to_square(image: Image.Image, size: int) -> Image.Image:
     offset = ((size - new_size[0]) // 2, (size - new_size[1]) // 2)
     canvas.paste(resized, offset)
     return canvas
+
+
+def _resize_depth_map(depth: np.ndarray, width: int, height: int) -> np.ndarray:
+    if depth.shape[:2] == (height, width):
+        return depth.astype(np.float32, copy=False)
+    depth_img = Image.fromarray(depth.astype(np.float32))
+    depth_img = depth_img.resize((width, height), Image.Resampling.BILINEAR)
+    return np.array(depth_img, dtype=np.float32)
 
 
 def _composite_over_black(image: Image.Image) -> Image.Image:
@@ -724,8 +1039,43 @@ def _depth_min_max(depth: np.ndarray) -> tuple[float, float]:
     return float(depth[mask].min()), float(depth[mask].max())
 
 
+def _depth_quantiles_from_views(
+    views: Iterable[dict],
+    low: float = 0.02,
+    high: float = 0.98,
+) -> tuple[float, float] | None:
+    values: List[np.ndarray] = []
+    for view in views:
+        depth_path_raw = str(view.get("depth_path") or "").strip()
+        if not depth_path_raw:
+            continue
+        depth_path = Path(depth_path_raw)
+        if not depth_path.exists():
+            continue
+        depth = np.load(depth_path).astype(np.float32)
+        mask = depth > 0
+        if np.any(mask):
+            values.append(depth[mask].reshape(-1))
+    if not values:
+        return None
+    stack = np.concatenate(values, axis=0)
+    if stack.size == 0:
+        return None
+    low_val = float(np.quantile(stack, low))
+    high_val = float(np.quantile(stack, high))
+    if high_val - low_val < 1e-6:
+        return None
+    return low_val, high_val
+
+
 def _views_have_depth(views: Iterable[dict]) -> bool:
-    return all(view.get("depth_path") for view in views)
+    for view in views:
+        depth_path_raw = str(view.get("depth_path") or "").strip()
+        if not depth_path_raw:
+            return False
+        if not Path(depth_path_raw).exists():
+            return False
+    return True
 
 
 def _ensure_view_intrinsics(views: Iterable[dict], fov_deg: float) -> List[dict]:
@@ -818,7 +1168,7 @@ def _try_gltfpack(path: Path) -> bool:
     exe = shutil.which("gltfpack")
     if not exe:
         return False
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path = path.with_name(f"{path.stem}.tmp{path.suffix}")
     try:
         subprocess.run([exe, "-i", str(path), "-o", str(tmp_path)], check=True)
     except (OSError, subprocess.CalledProcessError):

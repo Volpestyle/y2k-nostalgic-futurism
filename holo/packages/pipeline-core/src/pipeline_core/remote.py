@@ -34,7 +34,10 @@ class RemoteStageRunner:
         response = json.loads(body) if body else {}
         output_payload = response.get("output") or {}
         output = _artifact_from_payload(request.output, output_payload)
-        return StageResult(output=output, metadata=response.get("metadata") or {})
+        metadata = response.get("metadata") or {}
+        if isinstance(metadata, dict):
+            metadata.setdefault("runner", "remote")
+        return StageResult(output=output, metadata=metadata)
 
 
 def _artifact_payload(artifact: Artifact) -> Dict[str, Any]:
