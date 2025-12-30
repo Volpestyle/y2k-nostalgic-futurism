@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import time
+import traceback
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Tuple
+
+from dotenv import load_dotenv
 
 from .config import load_config
 from .jobstore import JobStore
@@ -12,6 +15,7 @@ from .pipeline import run_bake
 
 
 def main() -> None:
+    _load_env()
     _ensure_torch_version()
     _ensure_torch_xpu_stub()
     _ensure_torch_device_mesh_stub()
@@ -53,8 +57,14 @@ def main() -> None:
             store.update(job.id, status="done", progress=1.0, output_key=output_key)
             print(f"[worker] job {job.id} done → {output_key}")
         except Exception as e:
-            store.update(job.id, status="error", error_message=str(e))
-            print(f"[worker] job {job.id} error: {e}")
+            message = str(e).strip()
+            if message:
+                summary = f"{type(e).__name__}: {message}"
+            else:
+                summary = f"{type(e).__name__}"
+            store.update(job.id, status="error", error_message=summary)
+            print(f"[worker] job {job.id} error: {summary}")
+            traceback.print_exc()
 
 
 def _export_extension(spec_json: str) -> str:
@@ -66,6 +76,12 @@ def _export_extension(spec_json: str) -> str:
     if isinstance(export_cfg, dict) and export_cfg.get("format") == "glb":
         return "glb"
     return "gltf"
+
+
+def _load_env() -> None:
+    env_path = Path(__file__).resolve().parents[3] / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
 
 
 def _ensure_torch_version(min_major: int = 2, min_minor: int = 1) -> None:

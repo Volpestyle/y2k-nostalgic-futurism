@@ -45,11 +45,13 @@ python -m worker.worker
 
 ## Pipeline runner mode
 
-The worker can dispatch pipeline stages to local, api, or remote runners:
+The worker auto-selects local vs api based on the BakeSpec (any stage with a
+`provider` uses api runners with local fallback). You can override:
 
 ```bash
 export HOLO_PIPELINE_RUNNER=local
 # export HOLO_PIPELINE_RUNNER=api
+# export HOLO_PIPELINE_RUNNER=auto
 # export HOLO_PIPELINE_RUNNER=remote
 # export HOLO_PIPELINE_REMOTE_URL=http://localhost:9090
 ```

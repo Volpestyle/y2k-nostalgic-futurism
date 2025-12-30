@@ -6,13 +6,24 @@ from typing import Optional
 
 try:
     from ai_kit import Kit, KitConfig
-    from ai_kit.providers import AnthropicConfig, GeminiConfig, OpenAIConfig, XAIConfig
+    from ai_kit.providers import (
+        AnthropicConfig,
+        FalConfig,
+        GeminiConfig,
+        MeshyConfig,
+        OpenAIConfig,
+        ReplicateConfig,
+        XAIConfig,
+    )
 except ImportError as exc:  # pragma: no cover - handled at runtime
     Kit = None
     KitConfig = None
     AnthropicConfig = None
+    FalConfig = None
     GeminiConfig = None
+    MeshyConfig = None
     OpenAIConfig = None
+    ReplicateConfig = None
     XAIConfig = None
     _IMPORT_ERROR: Optional[Exception] = exc
 else:
@@ -131,6 +142,55 @@ def get_kit() -> Optional[Kit]:
         if base_url:
             cfg.base_url = base_url
         providers["google"] = cfg
+
+    replicate_key = _env_first(
+        "AI_KIT_REPLICATE_API_KEY",
+        "REPLICATE_API_TOKEN",
+        "REPLICATE_API_KEY",
+    )
+    replicate_keys = _split_csv(
+        os.getenv("AI_KIT_REPLICATE_API_KEYS", "")
+    )
+    if replicate_key or replicate_keys:
+        cfg = ReplicateConfig(api_key=replicate_key or "", api_keys=replicate_keys or None)
+        base_url = (
+            os.getenv("AI_KIT_REPLICATE_BASE_URL", "")
+        ).strip()
+        if base_url:
+            cfg.base_url = base_url
+        providers["replicate"] = cfg
+
+    fal_key = _env_first(
+        "AI_KIT_FAL_API_KEY",
+        "FAL_KEY",
+    )
+    fal_keys = _split_csv(
+        os.getenv("AI_KIT_FAL_API_KEYS", "")
+    )
+    if fal_key or fal_keys:
+        cfg = FalConfig(api_key=fal_key or "", api_keys=fal_keys or None)
+        base_url = (
+            os.getenv("AI_KIT_FAL_BASE_URL", "")
+        ).strip()
+        if base_url:
+            cfg.base_url = base_url
+        providers["fal"] = cfg
+
+    meshy_key = _env_first(
+        "AI_KIT_MESHY_API_KEY",
+        "MESHY_API_KEY",
+    )
+    meshy_keys = _split_csv(
+        os.getenv("AI_KIT_MESHY_API_KEYS", "")
+    )
+    if meshy_key or meshy_keys:
+        cfg = MeshyConfig(api_key=meshy_key or "", api_keys=meshy_keys or None)
+        base_url = (
+            os.getenv("AI_KIT_MESHY_BASE_URL", "")
+        ).strip()
+        if base_url:
+            cfg.base_url = base_url
+        providers["meshy"] = cfg
 
     if not providers:
         return None
