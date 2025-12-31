@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createHoloClient, type JobStatusResponse, type ModelMetadata } from "@holo/sdk";
+import { createHoloClient, type JobStatusResponse, type ModelInputSpec, type ModelMetadata } from "@holo/sdk";
 import { BasicGltfViewer, type RenderMode } from "@holo/viewer-three";
 import { BakeSpecSchema } from "@holo/shared-spec";
 import {
@@ -51,6 +51,28 @@ type ViewManifest = {
   version?: number;
   fov_deg?: number;
   views?: ViewManifestEntry[];
+};
+
+type JobEventPayload = {
+  sort?: number;
+  event?: {
+    kind?: string;
+    stage?: string;
+    message?: string;
+    progress?: number;
+    artifact?: {
+      name?: string;
+    };
+  };
+};
+
+type JobEventEntry = {
+  id: number;
+  kind: string;
+  stage: string;
+  message?: string;
+  progress?: number;
+  artifactName?: string;
 };
 
 const getBasename = (raw: string) => {
@@ -123,6 +145,152 @@ const parseParameters = (raw: string) => {
   return parsed as Record<string, unknown>;
 };
 
+const resolveInputValue = (input: ModelInputSpec, params: Record<string, unknown>) => {
+  const raw = params[input.name];
+  if (raw === undefined) {
+    if (input.default !== undefined) return input.default;
+    if (input.type === "boolean") return false;
+    return "";
+  }
+  if (input.type === "number") {
+    if (typeof raw === "number") return raw;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : "";
+  }
+  if (input.type === "boolean") {
+    return Boolean(raw);
+  }
+  return typeof raw === "string" ? raw : String(raw);
+};
+
+const upsertParameterValue = (
+  setRaw: React.Dispatch<React.SetStateAction<string>>,
+  name: string,
+  value: unknown
+) => {
+  setRaw((prev) => {
+    const parsed = parseParameters(prev) || {};
+    const next = { ...parsed };
+    if (value === "" || value === undefined) {
+      delete next[name];
+    } else {
+      next[name] = value;
+    }
+    return JSON.stringify(next, null, 2);
+  });
+};
+
+type ModelInputsEditorProps = {
+  inputs?: ModelInputSpec[];
+  parametersRaw: string;
+  setParametersRaw: React.Dispatch<React.SetStateAction<string>>;
+  disabled?: boolean;
+};
+
+const ModelInputsEditor = ({
+  inputs,
+  parametersRaw,
+  setParametersRaw,
+  disabled
+}: ModelInputsEditorProps) => {
+  if (!inputs || inputs.length === 0) return null;
+  const parsed = parseParameters(parametersRaw);
+  const params = parsed || {};
+  const hasInvalid = parametersRaw.trim().length > 0 && !parsed;
+
+  return (
+    <>
+      <Hint>Model inputs</Hint>
+      {inputs.map((input) => {
+        const label = input.label || input.name;
+        if (input.type === "boolean") {
+          const value = Boolean(resolveInputValue(input, params));
+          return (
+            <Label key={input.name} className="ui-toggle">
+              <Checkbox
+                checked={value}
+                onChange={(e) => upsertParameterValue(setParametersRaw, input.name, e.target.checked)}
+                disabled={disabled}
+              />
+              {label}
+            </Label>
+          );
+        }
+        if (input.type === "select") {
+          const value = String(resolveInputValue(input, params));
+          return (
+            <Label key={input.name}>
+              {label}
+              <Select
+                value={value}
+                onChange={(e) => upsertParameterValue(setParametersRaw, input.name, e.target.value)}
+                disabled={disabled}
+              >
+                {(input.options || []).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </Label>
+          );
+        }
+        if (input.type === "number") {
+          const value = resolveInputValue(input, params);
+          const valueString = value === "" ? "" : String(value);
+          return (
+            <Label key={input.name}>
+              {label}
+              <Input
+                type="number"
+                value={valueString}
+                min={input.min}
+                max={input.max}
+                step={input.step}
+                placeholder={input.placeholder}
+                onChange={(e) => {
+                  const next = e.target.value === "" ? "" : Number(e.target.value);
+                  upsertParameterValue(setParametersRaw, input.name, next);
+                }}
+                disabled={disabled}
+              />
+            </Label>
+          );
+        }
+        const value = String(resolveInputValue(input, params));
+        if (input.multiline) {
+          return (
+            <Label key={input.name}>
+              {label}
+              <Textarea
+                rows={2}
+                value={value}
+                placeholder={input.placeholder}
+                onChange={(e) => upsertParameterValue(setParametersRaw, input.name, e.target.value)}
+                disabled={disabled}
+              />
+            </Label>
+          );
+        }
+        return (
+          <Label key={input.name}>
+            {label}
+            <Input
+              value={value}
+              placeholder={input.placeholder}
+              onChange={(e) => upsertParameterValue(setParametersRaw, input.name, e.target.value)}
+              disabled={disabled}
+            />
+          </Label>
+        );
+      })}
+      {hasInvalid && (
+        <Hint>Parameters JSON is invalid. Editing model inputs will replace it.</Hint>
+      )}
+    </>
+  );
+};
+
 const getModelLabel = (model: ModelMetadata | undefined, fallback: string) => {
   return model?.displayName || model?.id || fallback;
 };
@@ -134,12 +302,21 @@ const getApiModelLabel = (model: ModelMetadata) => {
   return model.available === false ? `${label} (missing API key)` : label;
 };
 
+const findModelById = (
+  models: ModelMetadata[],
+  provider: string | undefined,
+  modelId: string | undefined
+) => {
+  if (!provider || !modelId) return undefined;
+  return models.find((model) => model.provider === provider && model.id === modelId);
+};
+
 const PROVIDER_KEY_HINTS: Record<string, string> = {
   openai: "AI_KIT_OPENAI_API_KEY or OPENAI_API_KEY",
   anthropic: "AI_KIT_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY",
   google: "AI_KIT_GOOGLE_API_KEY or GOOGLE_API_KEY",
   xai: "AI_KIT_XAI_API_KEY or XAI_API_KEY",
-  replicate: "AI_KIT_REPLICATE_API_KEY, REPLICATE_API_TOKEN, or REPLICATE_API_KEY",
+  replicate: "AI_KIT_REPLICATE_API_KEY or REPLICATE_API_TOKEN",
   fal: "AI_KIT_FAL_API_KEY, FAL_API_KEY, or FAL_KEY",
   meshy: "AI_KIT_MESHY_API_KEY or MESHY_API_KEY"
 };
@@ -218,6 +395,7 @@ type PipelineStorage = {
   reconApiModelOverride?: string;
   reconPrompt?: string;
   reconFormat?: string;
+  reconParameters?: string;
 };
 
 const readPipelineStorage = (): PipelineStorage | null => {
@@ -292,12 +470,20 @@ export function CreateModelsPanel({
   const [depthPreviewImage, setDepthPreviewImage] = useState<string | null>(null);
   const [depthMaps, setDepthMaps] = useState<Record<string, string>>({});
   const [pointsUrl, setPointsUrl] = useState<string | null>(null);
+  const [eventStreamState, setEventStreamState] = useState<
+    "idle" | "connecting" | "connected" | "error"
+  >("idle");
+  const [eventLog, setEventLog] = useState<JobEventEntry[]>([]);
+  const [stageProgress, setStageProgress] = useState<Record<string, number>>({});
   const cutoutPreviewRef = useRef<string | null>(null);
   const depthPreviewRef = useRef<string | null>(null);
   const depthMapUrlsRef = useRef<string[]>([]);
   const depthMapsRef = useRef<Record<string, string>>({});
   const pointsLoadedRef = useRef<string | null>(null);
   const artifactsLoadedRef = useRef({ cutout: false, views: false, depth: false, points: false });
+  const eventIdRef = useRef<number>(0);
+  const refreshTimerRef = useRef<number | null>(null);
+  const statusRef = useRef(status);
 
   const [cutoutSource, setCutoutSource] = useState<PipelineSource>(() =>
     normalizePipelineSource(storedPipelineSettings?.cutoutSource)
@@ -389,6 +575,9 @@ export function CreateModelsPanel({
   const [reconFormat, setReconFormat] = useState(
     storedPipelineSettings?.reconFormat || ""
   );
+  const [reconParametersRaw, setReconParametersRaw] = useState(
+    storedPipelineSettings?.reconParameters || ""
+  );
   const [viewsCount, setViewsCount] = useState(8);
   const [pointsEnabled, setPointsEnabled] = useState(true);
   const [renderMode, setRenderMode] = useState<RenderMode>("mesh");
@@ -475,6 +664,10 @@ export function CreateModelsPanel({
   }, [jobId]);
 
   useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
     depthMapsRef.current = depthMaps;
   }, [depthMaps]);
 
@@ -494,7 +687,7 @@ export function CreateModelsPanel({
     let cancelled = false;
     const loadModels = async () => {
       try {
-        const data = await client.listProviderModels();
+        const data = await client.listProviderModels({ allowFallback: false });
         if (cancelled) return;
         setModels(data);
         setModelsError(null);
@@ -676,6 +869,30 @@ export function CreateModelsPanel({
     captionProviderValue && captionModelValue
       ? buildApiKey(captionProviderValue, captionModelValue)
       : "";
+  const selectedCutoutModel = useMemo(() => {
+    if (cutoutSource === "local") {
+      return findModelById(models, "catalog", cutoutModel);
+    }
+    return findModelById(models, cutoutProviderValue, cutoutApiModelValue);
+  }, [models, cutoutSource, cutoutModel, cutoutProviderValue, cutoutApiModelValue]);
+  const selectedViewsModel = useMemo(() => {
+    if (viewsSource === "local") {
+      return findModelById(models, "catalog", viewsModelValue);
+    }
+    return findModelById(models, viewsProviderValue, viewsApiModelValue);
+  }, [models, viewsSource, viewsModelValue, viewsProviderValue, viewsApiModelValue]);
+  const selectedDepthModel = useMemo(() => {
+    if (depthSource === "local") {
+      return findModelById(models, "catalog", depthModel);
+    }
+    return findModelById(models, depthProviderValue, depthApiModelValue);
+  }, [models, depthSource, depthModel, depthProviderValue, depthApiModelValue]);
+  const selectedReconModel = useMemo(() => {
+    if (reconSource === "local") {
+      return undefined;
+    }
+    return findModelById(models, reconProviderValue, reconApiModelValue);
+  }, [models, reconSource, reconProviderValue, reconApiModelValue]);
   const apiSelectionError = useMemo(() => {
     const missing = [];
     if (cutoutSource === "api" && (!cutoutProviderValue || !cutoutApiModelValue)) {
@@ -751,6 +968,12 @@ export function CreateModelsPanel({
       };
     });
   }, [depthManifest, getArtifactUrl]);
+  const stageProgressItems = useMemo(() => {
+    const order = ["normalize", "remove_bg", "multiview", "depth", "meshy"];
+    return order
+      .map((stage) => ({ stage, progress: stageProgress[stage] }))
+      .filter((item) => typeof item.progress === "number");
+  }, [stageProgress]);
 
   useEffect(() => {
     if (!availableVisionModels.length) return;
@@ -824,11 +1047,27 @@ export function CreateModelsPanel({
   }, [availableCutoutProviderModels, cutoutApiModel]);
 
   useEffect(() => {
+    const override = cutoutApiModelOverride.trim();
+    if (!override) return;
+    if (!availableCutoutProviderModels.some((model) => model.id === override)) {
+      setCutoutApiModelOverride("");
+    }
+  }, [availableCutoutProviderModels, cutoutApiModelOverride]);
+
+  useEffect(() => {
     if (!availableDepthProviderModels.length) return;
     if (!availableDepthProviderModels.some((model) => model.id === depthApiModel)) {
       setDepthApiModel(availableDepthProviderModels[0].id);
     }
   }, [availableDepthProviderModels, depthApiModel]);
+
+  useEffect(() => {
+    const override = depthApiModelOverride.trim();
+    if (!override) return;
+    if (!availableDepthProviderModels.some((model) => model.id === override)) {
+      setDepthApiModelOverride("");
+    }
+  }, [availableDepthProviderModels, depthApiModelOverride]);
 
   useEffect(() => {
     if (!availableViewsProviderModels.length) return;
@@ -838,11 +1077,27 @@ export function CreateModelsPanel({
   }, [availableViewsProviderModels, viewsApiModel]);
 
   useEffect(() => {
+    const override = viewsApiModelOverride.trim();
+    if (!override) return;
+    if (!availableViewsProviderModels.some((model) => model.id === override)) {
+      setViewsApiModelOverride("");
+    }
+  }, [availableViewsProviderModels, viewsApiModelOverride]);
+
+  useEffect(() => {
     if (!availableReconProviderModels.length) return;
     if (!availableReconProviderModels.some((model) => model.id === reconApiModel)) {
       setReconApiModel(availableReconProviderModels[0].id);
     }
   }, [availableReconProviderModels, reconApiModel]);
+
+  useEffect(() => {
+    const override = reconApiModelOverride.trim();
+    if (!override) return;
+    if (!availableReconProviderModels.some((model) => model.id === override)) {
+      setReconApiModelOverride("");
+    }
+  }, [availableReconProviderModels, reconApiModelOverride]);
 
   useEffect(() => {
     if (!availableProviderModels.length) return;
@@ -880,7 +1135,8 @@ export function CreateModelsPanel({
       reconApiModel,
       reconApiModelOverride,
       reconPrompt,
-      reconFormat
+      reconFormat,
+      reconParameters: reconParametersRaw
     });
   }, [
     cutoutSource,
@@ -910,7 +1166,8 @@ export function CreateModelsPanel({
     reconApiModel,
     reconApiModelOverride,
     reconPrompt,
-    reconFormat
+    reconFormat,
+    reconParametersRaw
   ]);
 
   const loadRecentJobs = useCallback(async () => {
@@ -968,7 +1225,7 @@ export function CreateModelsPanel({
         if (res.ok) {
           const raw = await res.text();
           const manifest = safeParseJson(raw);
-          if (manifest && Array.isArray(manifest.views)) {
+          if (manifest && Array.isArray(manifest.views) && manifest.views.length > 0) {
             setViewsManifest(manifest as ViewManifest);
             artifactsLoadedRef.current.views = true;
           }
@@ -986,7 +1243,11 @@ export function CreateModelsPanel({
           if (contentType.includes("application/json") || contentType.includes("text/")) {
             const raw = await res.text();
             const manifest = safeParseJson(raw);
-            if (manifest && Array.isArray(manifest.views)) {
+            if (
+              manifest &&
+              Array.isArray(manifest.views) &&
+              manifest.views.some((view: ViewManifestEntry) => Boolean(view.depth_path))
+            ) {
               setDepthManifest(manifest as ViewManifest);
               artifactsLoadedRef.current.depth = true;
               return;
@@ -1018,6 +1279,15 @@ export function CreateModelsPanel({
       }
     }
   }, [artifactBase, getArtifactUrl]);
+
+  const scheduleArtifactRefresh = useCallback(() => {
+    if (!artifactBase) return;
+    if (refreshTimerRef.current) return;
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null;
+      refreshArtifacts();
+    }, 250);
+  }, [artifactBase, refreshArtifacts]);
 
   useEffect(() => {
     if (depthItems.length === 0) return;
@@ -1072,6 +1342,14 @@ export function CreateModelsPanel({
   async function startBake() {
     setError(null);
     if (!modelFile) return;
+    if (!modelsLoaded) {
+      setError("Model list still loading.");
+      return;
+    }
+    if (modelsError) {
+      setError(`Model list error: ${modelsError}`);
+      return;
+    }
     if (apiSelectionError) {
       setError(apiSelectionError);
       return;
@@ -1094,6 +1372,11 @@ export function CreateModelsPanel({
     const viewsParameters = parseParameters(viewsParametersRaw);
     if (viewsParametersRaw.trim() && !viewsParameters) {
       setError("View parameters must be valid JSON.");
+      return;
+    }
+    const reconParameters = reconSource === "api" ? parseParameters(reconParametersRaw) : null;
+    if (reconSource === "api" && reconParametersRaw.trim() && !reconParameters) {
+      setError("Recon parameters must be valid JSON.");
       return;
     }
 
@@ -1172,7 +1455,18 @@ export function CreateModelsPanel({
     });
 
     setStatus("uploading");
-    const { jobId } = await client.createJob({ image: modelFile, bakeSpec });
+    const pipelineConfig: Record<string, unknown> = {};
+    if (cutoutParameters) pipelineConfig.remove_bg_params = cutoutParameters;
+    if (depthParameters) pipelineConfig.depth_params = depthParameters;
+    if (viewsParameters) pipelineConfig.multiview_params = viewsParameters;
+    if (reconSource === "api" && reconParameters) pipelineConfig.meshy_params = reconParameters;
+
+    const hasPipelineConfig = Object.keys(pipelineConfig).length > 0;
+    const { jobId } = await client.createJob({
+      image: modelFile,
+      bakeSpec,
+      pipelineConfig: hasPipelineConfig ? pipelineConfig : undefined
+    });
     setJobId(jobId);
     setStatus("queued");
   }
@@ -1193,34 +1487,142 @@ export function CreateModelsPanel({
   useEffect(() => {
     if (!jobId) return;
     let cancelled = false;
+    let eventSource: EventSource | null = null;
+    let pollTimer: number | null = null;
+    let done = false;
+    let streamReady = false;
 
-    const tick = async () => {
+    setError(null);
+    setEventStreamState("connecting");
+    setEventLog([]);
+    setStageProgress({});
+    eventIdRef.current = 0;
+
+    const stopPolling = () => {
+      if (pollTimer) {
+        window.clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const handleDone = async () => {
+      if (done) return;
+      done = true;
+      setStatus("done");
+      setProgress(1);
+      await refreshArtifacts();
+      const url = client.getResultUrl(jobId);
+      await viewerRef.current?.load(url, { renderMode });
+    };
+
+    const handleFailed = (message?: string) => {
+      done = true;
+      setStatus("error");
+      setError(message || "unknown error");
+    };
+
+    const handleJobPoll = async () => {
       try {
         const j = await client.getJob(jobId);
         if (cancelled) return;
         setStatus(j.status);
         setProgress(j.progress);
-        await refreshArtifacts();
         if (j.status === "done") {
-          const url = j.resultUrl || client.getResultUrl(jobId);
-          await viewerRef.current?.load(url, { renderMode });
+          await handleDone();
           return;
         }
         if (j.status === "error") {
-          setError(j.error || "unknown error");
+          handleFailed(j.error);
           return;
         }
-        setTimeout(tick, 800);
       } catch (e: any) {
         setError(String(e?.message || e));
       }
+      if (!cancelled && !done && !streamReady) {
+        pollTimer = window.setTimeout(handleJobPoll, 3000);
+      }
     };
 
-    tick();
+    const handleStreamEvent = (payload: JobEventPayload) => {
+      if (!payload || typeof payload !== "object") return;
+      const event = payload.event;
+      if (!event || typeof event !== "object") return;
+      const sort = Number(payload.sort || eventIdRef.current + 1);
+      eventIdRef.current = Math.max(eventIdRef.current, sort);
+      const kind = event.kind || "event";
+      const stage = event.stage || "pipeline";
+      const message = event.message;
+      const progressValue = typeof event.progress === "number" ? event.progress : undefined;
+      const artifactName = event.artifact?.name;
+
+      setEventLog((prev) => {
+        const next = [
+          { id: sort, kind, stage, message, progress: progressValue, artifactName },
+          ...prev
+        ];
+        return next.slice(0, 12);
+      });
+
+      if (kind === "progress" && typeof progressValue === "number") {
+        setStageProgress((prev) => ({ ...prev, [stage]: progressValue }));
+        if (stage === "overall") {
+          setProgress(progressValue);
+          if (statusRef.current === "queued" || statusRef.current === "loading") {
+            setStatus("running");
+          }
+        }
+      }
+
+      if (kind === "artifact" && artifactName) {
+        scheduleArtifactRefresh();
+      }
+
+      if (kind === "status") {
+        if (stage === "done") {
+          handleDone();
+        } else if (stage === "failed") {
+          handleFailed(message);
+        }
+      }
+    };
+
+    handleJobPoll();
+
+    if (typeof EventSource !== "undefined") {
+      const url = `${API_BASE_URL}/v1/jobs/${jobId}/events`;
+      eventSource = new EventSource(url);
+      eventSource.onopen = () => {
+        setEventStreamState("connected");
+        streamReady = true;
+        stopPolling();
+      };
+      eventSource.onerror = () => {
+        if (cancelled) return;
+        setEventStreamState("error");
+        streamReady = false;
+        if (!done) {
+          stopPolling();
+          handleJobPoll();
+        }
+      };
+      eventSource.addEventListener("job", (evt) => {
+        const data = typeof evt.data === "string" ? safeParseJson(evt.data) : null;
+        if (data) {
+          handleStreamEvent(data as JobEventPayload);
+        }
+      });
+    } else {
+      setEventStreamState("idle");
+    }
+
     return () => {
       cancelled = true;
+      stopPolling();
+      if (eventSource) {
+        eventSource.close();
+      }
     };
-  }, [jobId, refreshArtifacts]);
+  }, [jobId, refreshArtifacts, renderMode, scheduleArtifactRefresh]);
 
   return (
     <div className="hudPanelStack">
@@ -1390,6 +1792,12 @@ export function CreateModelsPanel({
                   onChange={(e) => setCutoutSize(e.target.value)}
                 />
               </Label>
+              <ModelInputsEditor
+                inputs={selectedCutoutModel?.inputs}
+                parametersRaw={cutoutParametersRaw}
+                setParametersRaw={setCutoutParametersRaw}
+                disabled={cutoutSource === "api" && !cutoutProviderValue}
+              />
               <Label>
                 Parameters (JSON)
                 <Textarea
@@ -1498,6 +1906,12 @@ export function CreateModelsPanel({
                   onChange={(e) => setViewsPrompt(e.target.value)}
                 />
               </Label>
+              <ModelInputsEditor
+                inputs={selectedViewsModel?.inputs}
+                parametersRaw={viewsParametersRaw}
+                setParametersRaw={setViewsParametersRaw}
+                disabled={viewsSource === "api" && !viewsProviderValue}
+              />
               <Label>
                 Parameters (JSON)
                 <Textarea
@@ -1630,6 +2044,12 @@ export function CreateModelsPanel({
                   onChange={(e) => setDepthSize(e.target.value)}
                 />
               </Label>
+              <ModelInputsEditor
+                inputs={selectedDepthModel?.inputs}
+                parametersRaw={depthParametersRaw}
+                setParametersRaw={setDepthParametersRaw}
+                disabled={depthSource === "api" && !depthProviderValue}
+              />
               <Label>
                 Parameters (JSON)
                 <Textarea
@@ -1755,6 +2175,22 @@ export function CreateModelsPanel({
                   disabled={reconSource !== "api"}
                 />
               </Label>
+              <ModelInputsEditor
+                inputs={selectedReconModel?.inputs}
+                parametersRaw={reconParametersRaw}
+                setParametersRaw={setReconParametersRaw}
+                disabled={reconSource !== "api" || !reconProviderValue}
+              />
+              <Label>
+                Parameters (JSON)
+                <Textarea
+                  rows={2}
+                  value={reconParametersRaw}
+                  onChange={(e) => setReconParametersRaw(e.target.value)}
+                  placeholder='{"should_remesh": true}'
+                  disabled={reconSource !== "api"}
+                />
+              </Label>
             </div>
           </div>
           {modelsError && <Hint>Model list error: {modelsError}</Hint>}
@@ -1839,9 +2275,13 @@ export function CreateModelsPanel({
 
         <div className="hudActions">
           <Button
-            disabled={!modelFile || Boolean(apiSelectionError)}
+            disabled={!modelFile || Boolean(apiSelectionError) || !modelsLoaded || Boolean(modelsError)}
             onClick={startBake}
-            title={apiSelectionError || undefined}
+            title={
+              apiSelectionError ||
+              modelsError ||
+              (!modelsLoaded ? "Model list still loading." : undefined)
+            }
           >
             Start bake
           </Button>
@@ -1856,9 +2296,43 @@ export function CreateModelsPanel({
           <div>
             <strong>Progress:</strong> {(progress * 100).toFixed(0)}%
           </div>
+          <div>
+            <strong>Events:</strong> {eventStreamState}
+          </div>
           {jobId && (
             <div>
               <strong>Job:</strong> {jobId}
+            </div>
+          )}
+          {stageProgressItems.length > 0 && (
+            <div className="hudEventStages">
+              {stageProgressItems.map((item) => (
+                <div className="hudEventStage" key={item.stage}>
+                  <span>{item.stage.replace("_", " ")}</span>
+                  <span>{Math.round((item.progress ?? 0) * 100)}%</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {eventLog.length > 0 && (
+            <div className="hudEventLog">
+              {eventLog.map((entry) => (
+                <div className="hudEventRow" key={entry.id}>
+                  <span className={`hudEventKind hudEventKind-${entry.kind}`}>
+                    {entry.kind}
+                  </span>
+                  <span className="hudEventStageLabel">{entry.stage}</span>
+                  {typeof entry.progress === "number" && (
+                    <span className="hudEventProgress">
+                      {Math.round(entry.progress * 100)}%
+                    </span>
+                  )}
+                  {entry.artifactName && (
+                    <span className="hudEventArtifact">{entry.artifactName}</span>
+                  )}
+                  {entry.message && <span className="hudEventMessage">{entry.message}</span>}
+                </div>
+              ))}
             </div>
           )}
           {apiSelectionError && <div className="ui-warning">{apiSelectionError}</div>}
