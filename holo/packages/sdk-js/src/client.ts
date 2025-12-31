@@ -218,16 +218,37 @@ export function createHoloClient(baseUrl: string): HoloClient {
     },
 
     async listJobs(args) {
-      const stored = loadStoredJobs();
-      const filtered = args?.status
-        ? stored.filter((job) => job.status === args.status)
-        : stored;
-      const sorted = [...filtered].sort((a, b) => {
-        const aTime = a.updatedAt ? Date.parse(a.updatedAt) : 0;
-        const bTime = b.updatedAt ? Date.parse(b.updatedAt) : 0;
-        return bTime - aTime;
-      });
-      return sorted.slice(0, args?.limit || 25);
+      const params = new URLSearchParams();
+      if (args?.status) {
+        params.set("status", args.status);
+      }
+      if (args?.limit) {
+        params.set("limit", String(args.limit));
+      }
+      const query = params.toString();
+      const url = `${root}/v1/jobs${query ? `?${query}` : ""}`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`listJobs failed: ${res.status} ${await res.text()}`);
+        const raw = (await res.json()) as any;
+        if (!Array.isArray(raw)) {
+          throw new Error("listJobs failed: invalid response");
+        }
+        const jobs = raw.map(normalizeJobStatus);
+        jobs.forEach(rememberJob);
+        return jobs;
+      } catch {
+        const stored = loadStoredJobs();
+        const filtered = args?.status
+          ? stored.filter((job) => job.status === args.status)
+          : stored;
+        const sorted = [...filtered].sort((a, b) => {
+          const aTime = a.updatedAt ? Date.parse(a.updatedAt) : 0;
+          const bTime = b.updatedAt ? Date.parse(b.updatedAt) : 0;
+          return bTime - aTime;
+        });
+        return sorted.slice(0, args?.limit || 25);
+      }
     },
 
     async listProviderModels(args) {
