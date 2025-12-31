@@ -26,7 +26,7 @@ digraph G {
     label="Service";
     color="#3a3f5c";
     style="rounded";
-    API [label="Go API\npackages/api-go"];
+    API [label="img2mesh3d API\npackages/img2mesh3d"];
   }
 
   subgraph cluster_data {
@@ -42,7 +42,7 @@ digraph G {
     label="Workers";
     color="#3a3f5c";
     style="rounded";
-    WP [label="Python worker\npackages/worker-py"];
+    WP [label="img2mesh3d worker\npackages/img2mesh3d"];
     MODELS [shape=cylinder, label="Local models\n(seg + views + depth)"];
   }
 

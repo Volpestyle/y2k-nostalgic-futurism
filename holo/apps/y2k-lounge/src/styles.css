@@ -928,6 +928,90 @@ body[data-theme="light"] .hudSourceButton[data-active="true"] {
   margin-top: 10px;
 }
 
+.hudEventStages {
+  margin-top: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.hudEventStage {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: var(--lounge-hud-group);
+  border: 1px solid var(--lounge-hud-border);
+  font-size: 12px;
+}
+
+.hudEventLog {
+  margin-top: 8px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid var(--lounge-hud-border);
+  background: var(--lounge-hud-group);
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.hudEventRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.hudEventKind {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(71, 247, 212, 0.18);
+  color: #d7fff6;
+}
+
+.hudEventKind-log {
+  background: rgba(255, 199, 95, 0.18);
+  color: #ffe5b3;
+}
+
+.hudEventKind-progress {
+  background: rgba(71, 247, 212, 0.18);
+  color: #d7fff6;
+}
+
+.hudEventKind-artifact {
+  background: rgba(120, 164, 255, 0.18);
+  color: #cfdcff;
+}
+
+.hudEventKind-status {
+  background: rgba(255, 125, 125, 0.18);
+  color: #ffd6d6;
+}
+
+.hudEventStageLabel {
+  font-weight: 600;
+  color: var(--lounge-text-strong);
+}
+
+.hudEventProgress {
+  color: var(--lounge-accent);
+}
+
+.hudEventArtifact {
+  font-family: "Share Tech Mono", monospace;
+  color: var(--lounge-text-muted);
+}
+
+.hudEventMessage {
+  color: var(--lounge-text-muted);
+}
+
 .hudViewerFrame {
   height: 220px;
   border: 1px solid var(--lounge-viewer-border);

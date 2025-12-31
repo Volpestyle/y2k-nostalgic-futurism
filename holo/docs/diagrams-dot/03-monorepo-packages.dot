@@ -20,21 +20,18 @@ digraph G {
     SPEC [label="packages/shared-spec\nBakeSpec types/schema"];
     SDK [label="packages/sdk-js\nClient SDK"];
     VIEW [label="packages/viewer-three\nThree.js viewer"];
-    API [label="packages/api-go\nGo API"];
-    WRK [label="packages/worker-py\nPython worker"];
+    I2M [label="packages/img2mesh3d\nAPI + worker + pipeline"];
   }
 
   ROOT -> DEMO;
   ROOT -> SPEC;
   ROOT -> SDK;
   ROOT -> VIEW;
-  ROOT -> API;
-  ROOT -> WRK;
+  ROOT -> I2M;
 
   SPEC -> SDK;
-  SPEC -> API;
-  SPEC -> WRK;
+  SPEC -> I2M;
   SDK -> DEMO;
   VIEW -> DEMO;
-  API -> WRK [dir=both, label="job + blobs"];
+  SDK -> I2M [label="jobs"];
 }

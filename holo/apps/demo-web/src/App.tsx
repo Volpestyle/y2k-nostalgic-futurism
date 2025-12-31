@@ -73,16 +73,16 @@ export function App() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
 
   const [cutoutSource, setCutoutSource] = useState<PipelineSource>("local");
-  const [cutoutModel, setCutoutModel] = useState("rmbg-1.4");
-  const [cutoutProvider, setCutoutProvider] = useState("huggingface");
+  const [cutoutModel, setCutoutModel] = useState("bria/remove-background");
+  const [cutoutProvider, setCutoutProvider] = useState("replicate");
   const [cutoutApiModel, setCutoutApiModel] = useState("");
   const [depthSource, setDepthSource] = useState<PipelineSource>("local");
-  const [depthModel, setDepthModel] = useState("depth-anything-v2-small");
-  const [depthProvider, setDepthProvider] = useState("huggingface");
+  const [depthModel, setDepthModel] = useState("chenxwh/depth-anything-v2");
+  const [depthProvider, setDepthProvider] = useState("replicate");
   const [depthApiModel, setDepthApiModel] = useState("");
   const [viewsSource, setViewsSource] = useState<PipelineSource>("local");
-  const [viewsModel, setViewsModel] = useState("stable-zero123");
-  const [viewsProvider, setViewsProvider] = useState("huggingface");
+  const [viewsModel, setViewsModel] = useState("jd7h/zero123plusplus");
+  const [viewsProvider, setViewsProvider] = useState("replicate");
   const [viewsApiModel, setViewsApiModel] = useState("");
   const [viewsCount, setViewsCount] = useState(8);
   const [captionEnabled, setCaptionEnabled] = useState(false);
@@ -116,7 +116,7 @@ export function App() {
     let cancelled = false;
     const loadModels = async () => {
       try {
-        const data = await client.listProviderModels();
+        const data = await client.listProviderModels({ allowFallback: false });
         if (cancelled) return;
         setModels(data);
         setModelsError(null);
@@ -310,6 +310,14 @@ export function App() {
   async function startBake() {
     setError(null);
     if (!file) return;
+    if (!modelsLoaded) {
+      setError("Model list still loading.");
+      return;
+    }
+    if (modelsError) {
+      setError(`Model list error: ${modelsError}`);
+      return;
+    }
 
     const useCutoutApi = cutoutSource === "api" && cutoutProviderValue && cutoutApiModelValue;
     const useDepthApi = depthSource === "api" && depthProviderValue && depthApiModelValue;
@@ -747,7 +755,11 @@ export function App() {
                   <Hint>No vision-capable models available from ai-kit.</Hint>
                 )}
               </Group>
-              <Button disabled={!file} onClick={startBake}>
+              <Button
+                disabled={!file || !modelsLoaded || Boolean(modelsError)}
+                title={modelsError || (!modelsLoaded ? "Model list still loading." : undefined)}
+                onClick={startBake}
+              >
                 Start bake
               </Button>
 

@@ -12,7 +12,7 @@ flowchart LR
   end
 
   subgraph Service
-    API[Go API\npackages/api-go]
+    API[img2mesh3d API\npackages/img2mesh3d]
   end
 
   subgraph Data
@@ -22,7 +22,7 @@ flowchart LR
   end
 
   subgraph Workers
-    WP[Python worker\npackages/worker-py]
+    WP[img2mesh3d worker\npackages/img2mesh3d]
     MODELS[(Local models\n(seg + views + depth))]
   end
 

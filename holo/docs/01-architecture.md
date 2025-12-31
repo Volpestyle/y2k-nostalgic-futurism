@@ -20,9 +20,9 @@ This scaffold uses a **job-based** design so heavy 2D→3D bakes can scale from 
 
 ## Notes
 
-- The Go API talks to pluggable interfaces: `BlobStore`, `JobStore`, `WorkerBackend`, `Notifier`.
-- In local dev, these can be filesystem + SQLite + a local Python worker.
-- In the cloud, these can become S3 + DynamoDB + Batch/SageMaker Async + SNS/WebSocket.
+- The img2mesh3d API + worker live in `packages/img2mesh3d`.
+- In local dev, the API can run the pipeline in-process with a local artifact directory.
+- In the cloud, these can become S3 + DynamoDB + SQS + GPU workers.
 
 ---
 

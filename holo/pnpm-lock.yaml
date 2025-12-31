@@ -88,7 +88,6 @@ importers:
         specifier: ^5.0.0
         version: 5.4.21
 
-  packages/api-go: {}
 
   packages/sdk-js:
     dependencies:
@@ -130,7 +129,6 @@ importers:
         specifier: ^0.160.0
         version: 0.160.1
 
-  packages/worker-py: {}
 
 packages:
 

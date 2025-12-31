@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: img2mesh3d async job runner resources (SQS + DynamoDB + S3)
+
+Parameters:
+  ArtifactBucketName:
+    Type: String
+    Default: ""
+    Description: "Optional: provide an S3 bucket name to create. Leave blank to auto-generate."
+
+  DynamoTableName:
+    Type: String
+    Default: "img2mesh3d-jobs"
+    Description: "DynamoDB table name for job state + events"
+
+  QueueName:
+    Type: String
+    Default: "img2mesh3d-jobs"
+    Description: "SQS queue name"
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - HasBucketName
+        - !Ref ArtifactBucketName
+        - !Sub "${AWS::StackName}-${AWS::AccountId}-artifacts"
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${QueueName}-dlq"
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  JobQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref QueueName
+      VisibilityTimeout: 900
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref DynamoTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+        - AttributeName: sort
+          AttributeType: N
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+        - AttributeName: sort
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+Conditions:
+  HasBucketName: !Not [!Equals [!Ref ArtifactBucketName, ""]]
+
+Outputs:
+  ArtifactBucket:
+    Value: !Ref ArtifactBucket
+  QueueUrl:
+    Value: !Ref JobQueue
+  DynamoTable:
+    Value: !Ref JobsTable

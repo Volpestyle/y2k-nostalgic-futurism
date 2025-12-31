@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generates PNG diagrams from Mermaid files.
-# Requires Node.js. Uses npx so you don't need a global install.
-#
-# In a pnpm monorepo, you can add @mermaid-js/mermaid-cli as a devDependency and run it from there.
+# Requires Node.js.
+# This uses npx to run mermaid-cli without installing globally.
+# If you are in a pnpm monorepo, feel free to replace with pnpm dlx.
 
-npx -y @mermaid-js/mermaid-cli -i docs/diagrams/pipeline.mmd -o docs/diagrams/pipeline.png
-echo "✅ diagrams rendered"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DIAG_DIR="$ROOT/docs/diagrams"
+
+mkdir -p "$DIAG_DIR"
+
+npx -y @mermaid-js/mermaid-cli@latest -i "$DIAG_DIR/pipeline.mmd" -o "$DIAG_DIR/pipeline.png"
+npx -y @mermaid-js/mermaid-cli@latest -i "$DIAG_DIR/aws.mmd" -o "$DIAG_DIR/aws.png"
+
+echo "Rendered diagrams to $DIAG_DIR"

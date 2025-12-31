@@ -8,15 +8,14 @@ A scaffold for a 2D → (optional multi-view) → 3D *asset bake* pipeline, desi
 
 ## What you get
 
-- `packages/api-go` — Go HTTP API for job creation/status/result retrieval.
-- `packages/worker-py` — Python worker that pulls jobs and runs the bake pipeline (stubbed with placeholders).
+- `packages/img2mesh3d` — Python pipeline toolkit + FastAPI job API + SQS worker (local + AWS async).
 - `packages/shared-spec` — TypeScript BakeSpec schema + types (single source of truth).
 - `packages/sdk-js` — TypeScript SDK for submitting jobs + polling status.
 - `packages/viewer-three` — Three.js viewer utilities/components (loads glTF/GLB).
 - `apps/demo-web` — Example web app (upload → bake → view result).
 - `docs/` — Architecture + local/dev + deployment docs **with embedded diagrams**.
 
-> This is a scaffold: the worker currently produces a placeholder glTF asset so you can validate the end-to-end wiring.
+> This is a scaffold: the pipeline uses Replicate + Meshy in `packages/img2mesh3d` for end-to-end wiring.
 
 ## Quick start (local dev)
 
