@@ -55,13 +55,17 @@ class PipelineConfig(BaseModel):
     blender_bake_margin: float = Field(default=0.02, ge=0.0, le=0.5)
 
     # Camera + depth assumptions for local fusion
-    camera_fov_deg: float = Field(default=35.0, ge=10.0, le=120.0)
-    camera_radius: float = Field(default=1.2, ge=0.1)
-    views_elev_deg: float = Field(default=10.0, ge=-60.0, le=60.0)
+    # These should match the conventions of your multiview model (e.g., Zero123++).
+    # Default: camera at radius ~1.2 from origin, FOV ~50° for Zero123++ style renders.
+    camera_fov_deg: float = Field(default=50.0, ge=10.0, le=120.0)
+    camera_radius: float = Field(default=1.5, ge=0.1)
+    views_elev_deg: float = Field(default=20.0, ge=-60.0, le=60.0)
     views_azimuths_deg: Optional[List[float]] = Field(default=None)
     views_elevations_deg: Optional[List[float]] = Field(default=None)
     depth_invert: bool = Field(default=True)
-    depth_near: float = Field(default=0.2, ge=0.0)
+    # Depth range should be centered around camera_radius for best results.
+    # For camera at radius 1.5, object at origin with ~0.5 extent: [1.0, 2.0]
+    depth_near: float = Field(default=1.0, ge=0.0)
     depth_far: float = Field(default=2.0, ge=0.0)
 
     # Depth generation concurrency (threads)

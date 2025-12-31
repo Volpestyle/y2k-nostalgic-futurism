@@ -43,6 +43,33 @@ def _split_grid_image(grid_png: bytes) -> List[bytes]:
                 tiles.append(buf.getvalue())
         return tiles
 
+
+def _pad_to_square(image: Image.Image) -> Image.Image:
+    width, height = image.size
+    if width == height:
+        return image
+    side = max(width, height)
+    squared = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    left = (side - width) // 2
+    top = (side - height) // 2
+    squared.paste(image, (left, top))
+    return squared
+
+
+def _pick_depth_path(files: Dict[str, Path]) -> Optional[Path]:
+    keys = list(files.keys())
+    for want in ("grey", "gray", "depth"):
+        for k in keys:
+            kl = k.lower()
+            if want in kl and "color" not in kl and "colored" not in kl:
+                return files[k]
+    for k in keys:
+        kl = k.lower()
+        if "color" not in kl and "colored" not in kl:
+            return files[k]
+    return None
+
+
 @dataclass(frozen=True)
 class PipelineResult:
     job_id: Optional[str]
@@ -151,6 +178,7 @@ class ImageTo3DPipeline:
         normalized = workspace / "input" / "normalized.png"
         normalized.parent.mkdir(parents=True, exist_ok=True)
         img = Image.open(input_path).convert("RGBA")
+        img = _pad_to_square(img)
         img.save(normalized, format="PNG")
         publish_file("input/normalized.png", normalized, content_type="image/png")
         manifest["steps"]["normalize"] = {"normalized": "input/normalized.png"}
@@ -182,7 +210,7 @@ class ImageTo3DPipeline:
         mv = self.replicate.multiview_zero123plusplus(
             model=self.config.multiview_model,
             image_path=bg_path,
-            remove_background=False,
+            remove_background=True,
             parameters=self.config.multiview_params,
         )
         view_paths: List[Path] = []
@@ -226,6 +254,38 @@ class ImageTo3DPipeline:
                 "views_grid": "step2/views_grid.png",
                 "views": [f"step2/views/view_{i:02d}.png" for i in range(len(view_paths))],
             }
+
+        # Check for background removal failure on views
+        # (Sometimes the multiview model/client returns opaque backgrounds despite request)
+        for i, vp in enumerate(view_paths):
+            needs_bg_removal = False
+            try:
+                with Image.open(vp) as v_img:
+                    if v_img.mode != "RGBA":
+                        needs_bg_removal = True
+                    else:
+                        extrema = v_img.getextrema()
+                        if extrema and len(extrema) > 3:
+                            a_min, a_max = extrema[3]
+                            if a_min >= 255:
+                                needs_bg_removal = True
+            except Exception as e:
+                logger.warning("Failed to check alpha for view %s: %s", vp, e)
+
+            if needs_bg_removal:
+                logger.info("View %d has opaque background; running fallback background removal", i)
+                try:
+                    clean_bytes = self.replicate.remove_background(
+                        model=self.config.remove_bg_model,
+                        image_path=vp,
+                        parameters=self.config.remove_bg_params,
+                    )
+                    _write_bytes(vp, clean_bytes)
+                    # Re-publish to artifact store
+                    publish_file(f"step2/views/view_{i:02d}.png", vp, content_type="image/png")
+                except Exception as e:
+                    logger.error("Fallback background removal failed for view %d: %s", i, e)
+
         publish_manifest()
         report("multiview", 1.0)
 
@@ -265,12 +325,14 @@ class ImageTo3DPipeline:
                     name = "grey_depth" if "grey" in k else ("color_depth" if "color" in k else k)
                     ref = publish_file(f"step3/depth/{name}_{i:02d}.png", p, content_type="image/png")
                     depth_refs.append({"kind": name, "index": str(i), "path": ref.name})
-                    if "grey" in k:
-                        depth_paths[i] = p
-                    elif "color" in k and i not in depth_paths:
-                        depth_paths[i] = p
-                    elif i not in depth_paths:
-                        depth_paths[i] = p
+                chosen = _pick_depth_path(files)
+                if chosen is not None:
+                    depth_paths[i] = chosen
+                    try:
+                        with Image.open(chosen) as depth_img:
+                            logger.info("depth[%d] mode=%s", i, depth_img.mode)
+                    except Exception as exc:
+                        logger.debug("depth[%d] mode check failed: %s", i, exc)
                 done += 1
                 report("depth", done / total, f"Depth maps done: {done}/{total}")
 

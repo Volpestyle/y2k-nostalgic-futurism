@@ -1261,6 +1261,60 @@ body[data-theme="light"] .hudProgressBarScanlines {
   );
 }
 
+.hudRebuildProgress {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.hudRebuildProgressLabel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(200, 220, 240, 0.6);
+}
+
+body[data-theme="light"] .hudRebuildProgressLabel {
+  color: rgba(40, 60, 80, 0.6);
+}
+
+.hudRebuildProgressValue {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.hudRebuildProgressTrack {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(40, 60, 80, 0.35);
+  border: 1px solid rgba(120, 160, 190, 0.35);
+  overflow: hidden;
+}
+
+body[data-theme="light"] .hudRebuildProgressTrack {
+  background: rgba(180, 200, 220, 0.35);
+  border-color: rgba(120, 160, 190, 0.35);
+}
+
+.hudRebuildProgressFill {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: calc(var(--progress, 0) * 100%);
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(71, 247, 212, 0.2) 0%,
+    rgba(71, 247, 212, 0.6) 50%,
+    rgba(71, 247, 212, 0.2) 100%
+  );
+  transition: width 0.35s ease;
+}
+
 .hudProgressStages {
   display: flex;
   align-items: flex-start;

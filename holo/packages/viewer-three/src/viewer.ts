@@ -17,6 +17,16 @@ export type ViewerOptions = {
   post?: PostParams;
 };
 
+export type ViewerControlsOptions = {
+  enablePan?: boolean;
+  enableZoom?: boolean;
+  dampingFactor?: number;
+  screenSpacePanning?: boolean;
+  minDistance?: number;
+  maxDistance?: number;
+  target?: [number, number, number];
+};
+
 const DEFAULT_POST: Required<PostParams> = {
   enabled: true,
   bloomStrength: 0.35,
@@ -98,7 +108,22 @@ export class BasicGltfViewer {
   }
 
   setScreenSpacePanning(enabled: boolean) {
-    this.controls.screenSpacePanning = enabled;
+    this.setControlsOptions({ screenSpacePanning: enabled });
+  }
+
+  setControlsOptions(options: ViewerControlsOptions) {
+    if (options.enablePan !== undefined) this.controls.enablePan = options.enablePan;
+    if (options.enableZoom !== undefined) this.controls.enableZoom = options.enableZoom;
+    if (options.dampingFactor !== undefined) this.controls.dampingFactor = options.dampingFactor;
+    if (options.screenSpacePanning !== undefined) {
+      this.controls.screenSpacePanning = options.screenSpacePanning;
+    }
+    if (options.minDistance !== undefined) this.controls.minDistance = options.minDistance;
+    if (options.maxDistance !== undefined) this.controls.maxDistance = options.maxDistance;
+    if (options.target) {
+      this.controls.target.set(options.target[0], options.target[1], options.target[2]);
+    }
+    this.controls.update();
   }
 
   panBy(deltaX: number, deltaY: number) {

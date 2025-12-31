@@ -12,6 +12,7 @@ import {
   type ModelMetadata,
 } from "@holo/sdk";
 import { BasicGltfViewer, type RenderMode } from "@holo/viewer-three";
+import { defaultParams } from "@holo/visualizer-three";
 import { BakeSpecSchema } from "@holo/shared-spec";
 import {
   Badge,
@@ -653,13 +654,21 @@ export function CreateModelsPanel({
   const [captionPrompt, setCaptionPrompt] = useState(defaultCaptionPrompt);
   const [rebuildRunning, setRebuildRunning] = useState(false);
   const [rebuildError, setRebuildError] = useState<string | null>(null);
+  const [rebuildProgress, setRebuildProgress] = useState(0);
 
   useEffect(() => {
     const canvas = stageCanvasRef.current;
     if (!canvas) return;
 
     const viewer = new BasicGltfViewer({ canvas });
-    viewer.setScreenSpacePanning(true);
+    const visualizerControls = defaultParams.global.controls;
+    viewer.setControlsOptions({
+      screenSpacePanning: true,
+      enablePan: visualizerControls.enablePan,
+      enableZoom: visualizerControls.enableZoom,
+      dampingFactor: visualizerControls.dampingFactor,
+      target: [0, 0.2, 0],
+    });
     viewerRef.current = viewer;
 
     const onResize = () => viewer.resize();
@@ -1699,6 +1708,7 @@ export function CreateModelsPanel({
     setEventStreamState("connecting");
     setEventLog([]);
     setStageProgress({});
+    setRebuildProgress(0);
     eventIdRef.current = 0;
 
     const stopPolling = () => {
@@ -1775,6 +1785,10 @@ export function CreateModelsPanel({
       });
 
       if (kind === "progress" && typeof progressValue === "number") {
+        if (stage === "rebuild") {
+          setRebuildProgress(progressValue);
+          return;
+        }
         setStageProgress((prev) => ({ ...prev, [stage]: progressValue }));
         if (stage === "overall") {
           setProgress(progressValue);
@@ -1843,6 +1857,7 @@ export function CreateModelsPanel({
     if (!jobId || !canRebuild || rebuildRunning) return;
     setRebuildRunning(true);
     setRebuildError(null);
+    setRebuildProgress(0);
     try {
       const payload = {
         pipelineConfig: {
@@ -1867,8 +1882,10 @@ export function CreateModelsPanel({
       await refreshArtifacts();
       const url = client.getResultUrl(jobId);
       await viewerRef.current?.load(url, { renderMode });
+      setRebuildProgress(1);
     } catch (err: any) {
       setRebuildError(String(err?.message || err));
+      setRebuildProgress(0);
     } finally {
       setRebuildRunning(false);
     }
@@ -2561,6 +2578,24 @@ export function CreateModelsPanel({
               {rebuildRunning ? "Rebuilding..." : "Rebuild mesh"}
             </Button>
           </div>
+          {rebuildRunning && (
+            <div className="hudRebuildProgress" aria-live="polite">
+              <div className="hudRebuildProgressLabel">
+                <span>Rebuild mesh</span>
+                <span className="hudRebuildProgressValue">
+                  {Math.round(rebuildProgress * 100)}%
+                </span>
+              </div>
+              <div
+                className="hudRebuildProgressTrack"
+                style={
+                  { "--progress": rebuildProgress } as React.CSSProperties
+                }
+              >
+                <div className="hudRebuildProgressFill" />
+              </div>
+            </div>
+          )}
           <Hint>
             Rebuilds mesh from existing views + depth (local mode only).
           </Hint>

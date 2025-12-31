@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image
 
 from .config import PipelineConfig
+from .events import Emitter, PipelineEvent, now_ns
 
 logger = logging.getLogger("img2mesh3d.local_recon")
 
@@ -47,7 +48,32 @@ class LocalReconstructor:
         view_paths: List[Path],
         depth_paths: Dict[int, Path],
         out_dir: Path,
+        emit: Optional[Emitter] = None,
+        emit_stage: str = "rebuild",
     ) -> ReconOutputs:
+        def report(progress: float, message: Optional[str] = None) -> None:
+            if emit is None:
+                return
+            clamped = max(0.0, min(1.0, float(progress)))
+            if message:
+                emit(
+                    PipelineEvent(
+                        kind="log",
+                        stage=emit_stage,
+                        ts_ns=now_ns(),
+                        message=message,
+                    )
+                )
+            emit(
+                PipelineEvent(
+                    kind="progress",
+                    stage=emit_stage,
+                    ts_ns=now_ns(),
+                    progress=clamped,
+                )
+            )
+
+        report(0.0, "Rebuild started")
         import open3d as o3d
         import trimesh
         xatlas = None
@@ -99,19 +125,27 @@ class LocalReconstructor:
         frames = self._build_frames(view_paths, depth_paths, selected)
         if not frames:
             raise RuntimeError("No valid views with depth available for reconstruction")
+        report(0.2, "Prepared views")
 
         if self.config.recon_fusion == "tsdf":
+            report(0.3, "Fusing TSDF")
             pcd, mesh = self._fuse_tsdf(frames)
+            report(0.65, "TSDF fusion complete")
         else:
+            report(0.3, "Fusing points")
             pcd = self._fuse_points(frames)
             logger.info("recon points=%d", len(pcd.points))
+            report(0.55, "Point fusion complete")
             mesh = self._mesh_from_points(pcd)
+            report(0.7, "Meshing complete")
 
         logger.info("recon mesh raw verts=%d tris=%d", len(mesh.vertices), len(mesh.triangles))
         mesh = self._cleanup_mesh(mesh)
+        report(0.8, "Mesh cleanup complete")
         if self.config.recon_target_tris > 0:
             mesh = mesh.simplify_quadric_decimation(self.config.recon_target_tris)
             logger.info("recon mesh decimated verts=%d tris=%d", len(mesh.vertices), len(mesh.triangles))
+            report(0.85, "Mesh simplified")
         mesh.compute_vertex_normals()
 
         outputs = ReconOutputs()
@@ -121,6 +155,7 @@ class LocalReconstructor:
             pcd_to_save = self._limit_points(pcd)
             o3d.io.write_point_cloud(str(points_path), pcd_to_save)
             outputs.point_cloud_path = points_path
+            report(0.9, "Point cloud exported")
 
         vertices = np.asarray(mesh.vertices)
         faces = np.asarray(mesh.triangles)
@@ -143,6 +178,7 @@ class LocalReconstructor:
                 glb_data = trimesh.exchange.gltf.export_glb(uv_mesh)
                 glb_path.write_bytes(glb_data)
                 outputs.mesh_path = glb_path
+                report(0.95, "Texture baked")
             except Exception as exc:
                 logger.warning("pyxatlas bake failed; falling back. error=%s", exc)
                 texture_enabled = False
@@ -159,6 +195,7 @@ class LocalReconstructor:
                 )
                 outputs.mesh_path = baked_glb
                 outputs.texture_path = baked_tex
+                report(0.95, "Texture baked")
             except Exception as exc:
                 logger.warning("Blender bake failed; exporting untextured GLB. error=%s", exc)
                 texture_enabled = False
@@ -171,6 +208,7 @@ class LocalReconstructor:
                 vertex_colors=vertex_colors,
             )
             outputs.mesh_path = out_dir / "model.glb"
+        report(1.0, "Rebuild complete")
 
         return outputs
 
@@ -200,6 +238,14 @@ class LocalReconstructor:
         frames: List[ViewFrame] = []
         total = len(view_paths)
         angles = self._default_angles(total)
+        
+        # Log the camera angles being used
+        logger.info(
+            "recon camera angles for %d views: %s",
+            total,
+            [(f"view{i}:az={az:.0f}°,el={el:.0f}°") for i, (az, el) in enumerate(angles)]
+        )
+        
         for idx in indices:
             if idx >= total:
                 continue
@@ -207,21 +253,40 @@ class LocalReconstructor:
             if depth_path is None:
                 logger.debug("recon view %d skipped: missing depth", idx)
                 continue
-            color = self._load_color(view_paths[idx])
+            color, alpha = self._load_color(view_paths[idx])
             depth = self._load_depth(depth_path)
-            if depth.size:
-                dmin = float(np.min(depth))
-                dmax = float(np.max(depth))
+            if alpha.shape[:2] == depth.shape[:2]:
+                depth[alpha < 0.05] = 0.0
+            else:
                 logger.debug(
-                    "recon view %d size=%dx%d depth=%.4f..%.4f",
+                    "recon view %d alpha/depth mismatch: alpha=%s depth=%s",
+                    idx,
+                    alpha.shape,
+                    depth.shape,
+                )
+            
+            # Log depth statistics (non-zero values only for meaningful stats)
+            nonzero_depth = depth[depth > 0]
+            if nonzero_depth.size > 0:
+                logger.debug(
+                    "recon view %d size=%dx%d depth: min=%.3f max=%.3f mean=%.3f nonzero=%d/%d",
                     idx,
                     color.shape[1],
                     color.shape[0],
-                    dmin,
-                    dmax,
+                    float(np.min(nonzero_depth)),
+                    float(np.max(nonzero_depth)),
+                    float(np.mean(nonzero_depth)),
+                    nonzero_depth.size,
+                    depth.size,
                 )
+            
             az_deg, el_deg = angles[idx]
             cam_to_world, eye = self._camera_pose(az_deg, el_deg)
+            det = float(np.linalg.det(cam_to_world[:3, :3]))
+            logger.info(
+                "recon view %d: az=%.1f° el=%.1f° eye=[%.3f,%.3f,%.3f] det=%.3f",
+                idx, az_deg, el_deg, eye[0], eye[1], eye[2], det
+            )
             world_to_cam = np.linalg.inv(cam_to_world)
             h, w = depth.shape[:2]
             fx, fy, cx, cy = self._intrinsics(w, h)
@@ -247,8 +312,12 @@ class LocalReconstructor:
             if len(pairs) >= count:
                 return pairs[:count]
         if count == 6:
+            # Zero123++ outputs a 2x3 grid:
+            # Top row (views 0,1,2): azimuth 30°, 90°, 150° at elevation ~20°
+            # Bottom row (views 3,4,5): azimuth 210°, 270°, 330° at elevation ~-20°
+            # IMPORTANT: All views in same row share the same elevation!
             azimuths = [30, 90, 150, 210, 270, 330]
-            elevations = [30, -20, 30, -20, 30, -20]
+            elevations = [20, 20, 20, -20, -20, -20]
             return list(zip(azimuths, elevations))
         azimuths = np.linspace(0.0, 360.0, count, endpoint=False)
         return [(float(a), float(self.config.views_elev_deg)) for a in azimuths]
@@ -269,14 +338,34 @@ class LocalReconstructor:
         return cam_to_world, eye
 
     def _look_at(self, eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> np.ndarray:
+        """
+        Build a camera-to-world matrix using OpenGL-style convention:
+        - Camera looks down -Z axis in camera space
+        - +Y is up, +X is right
+        
+        For Open3D RGBD backprojection compatibility, we use:
+        - z_cam (forward into scene) for depth direction
+        - y_cam flipped to account for image Y-down vs world Y-up
+        """
+        # Forward direction (from eye toward target)
         forward = target - eye
-        forward /= np.linalg.norm(forward) + 1e-8
+        forward = forward / (np.linalg.norm(forward) + 1e-8)
+        
+        # Right direction
         right = np.cross(forward, up)
-        right /= np.linalg.norm(right) + 1e-8
-        true_up = np.cross(right, forward)
+        right = right / (np.linalg.norm(right) + 1e-8)
+        
+        # Recompute up to ensure orthonormal basis (right-handed: up = forward x right)
+        up_vec = np.cross(forward, right)
+        up_vec = up_vec / (np.linalg.norm(up_vec) + 1e-8)
+        
+        # Build cam_to_world transformation
+        # In camera space: +X=right, +Y=up, +Z=forward (into scene)
+        # Note: Open3D's RGBD backprojection has Y pointing down in image coords,
+        # so we negate Y to flip from image space to world space
         cam_to_world = np.eye(4, dtype=np.float64)
         cam_to_world[:3, 0] = right
-        cam_to_world[:3, 1] = true_up
+        cam_to_world[:3, 1] = -up_vec  # Negate Y to flip from image-Y-down to world-Y-up
         cam_to_world[:3, 2] = forward
         cam_to_world[:3, 3] = eye
         return cam_to_world
@@ -289,9 +378,12 @@ class LocalReconstructor:
         cy = height * 0.5
         return fx, fy, cx, cy
 
-    def _load_color(self, path: Path) -> np.ndarray:
-        img = Image.open(path).convert("RGB")
-        return np.asarray(img)
+    def _load_color(self, path: Path) -> Tuple[np.ndarray, np.ndarray]:
+        img = Image.open(path).convert("RGBA")
+        rgba = np.asarray(img)
+        color = np.ascontiguousarray(rgba[:, :, :3])
+        alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+        return color, alpha
 
     def _load_depth(self, path: Path) -> np.ndarray:
         img = Image.open(path)
@@ -325,9 +417,45 @@ class LocalReconstructor:
                 frame.color.shape[1], frame.color.shape[0], frame.fx, frame.fy, frame.cx, frame.cy
             )
             pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd, intrinsic)
+            
+            # Log camera-space point cloud bounds before transform
+            if len(pcd.points) > 0:
+                pts_cam = np.asarray(pcd.points)
+                logger.debug(
+                    "recon view %d camera-space bounds: X[%.3f,%.3f] Y[%.3f,%.3f] Z[%.3f,%.3f]",
+                    frame.index,
+                    pts_cam[:, 0].min(), pts_cam[:, 0].max(),
+                    pts_cam[:, 1].min(), pts_cam[:, 1].max(),
+                    pts_cam[:, 2].min(), pts_cam[:, 2].max(),
+                )
+            
             pcd.transform(frame.cam_to_world)
+            
+            # Log world-space point cloud bounds after transform
+            if len(pcd.points) > 0:
+                pts_world = np.asarray(pcd.points)
+                logger.debug(
+                    "recon view %d world-space bounds: X[%.3f,%.3f] Y[%.3f,%.3f] Z[%.3f,%.3f]",
+                    frame.index,
+                    pts_world[:, 0].min(), pts_world[:, 0].max(),
+                    pts_world[:, 1].min(), pts_world[:, 1].max(),
+                    pts_world[:, 2].min(), pts_world[:, 2].max(),
+                )
+            
             pcd_all += pcd
+            
         logger.info("recon point fusion merged=%d", len(pcd_all.points))
+        
+        # Log overall bounds before filtering
+        if len(pcd_all.points) > 0:
+            pts = np.asarray(pcd_all.points)
+            logger.info(
+                "recon merged bounds: X[%.3f,%.3f] Y[%.3f,%.3f] Z[%.3f,%.3f]",
+                pts[:, 0].min(), pts[:, 0].max(),
+                pts[:, 1].min(), pts[:, 1].max(),
+                pts[:, 2].min(), pts[:, 2].max(),
+            )
+        
         if self.config.recon_voxel_size > 0:
             pcd_all = pcd_all.voxel_down_sample(self.config.recon_voxel_size)
             logger.info("recon point fusion voxel=%.4f points=%d", self.config.recon_voxel_size, len(pcd_all.points))

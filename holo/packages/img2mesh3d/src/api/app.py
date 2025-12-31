@@ -21,6 +21,7 @@ from ai_kit.types import ModelCapabilities, ModelMetadata, TokenPrices
 
 from ..aws.s3 import presign_s3_url
 from ..config import AwsConfig, PipelineConfig
+from ..events import PipelineEvent
 from ..jobs.local import LocalJobRunner, LocalJobStore
 from ..jobs.runner_sqs import SqsJobRunner
 from ..jobs.store_dynamodb import JobStoreDynamoDB
@@ -702,9 +703,18 @@ def rebuild_recon(job_id: str, payload: Dict[str, Any] = Body(default_factory=di
         len(depth_paths),
         sorted(overrides.keys()),
     )
+    def emit(event: PipelineEvent) -> None:
+        LOCAL_STORE.put_event(job_id=job_id, sort=event.ts_ns, event=event.to_dict())
+
     recon = LocalReconstructor(cfg)
     out_dir = LOCAL_BASE_DIR / job_id / "recon"
-    outputs = recon.run(view_paths=view_paths, depth_paths=depth_paths, out_dir=out_dir)
+    outputs = recon.run(
+        view_paths=view_paths,
+        depth_paths=depth_paths,
+        out_dir=out_dir,
+        emit=emit,
+        emit_stage="rebuild",
+    )
 
     recon_step: Dict[str, str] = {}
     if outputs.mesh_path:
