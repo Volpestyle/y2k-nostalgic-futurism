@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -17,14 +17,24 @@ class PipelineConfig(BaseModel):
 
     # Replicate models
     remove_bg_model: str = Field(default="bria/remove-background")
-    multiview_model: str = Field(default="jd7h/zero123plusplus")
-    depth_model: str = Field(default="chenxwh/depth-anything-v2")
+    multiview_model: str = Field(
+        default="jd7h/zero123plusplus:c69c6559a29011b576f1ff0371b3bc1add2856480c60520c7e9ce0b40a6e9052"
+    )
+    depth_model: str = Field(
+        default="chenxwh/depth-anything-v2:b239ea33cff32bb7abb5db39ffe9a09c14cbc2894331d1ef66fe096eed88ebd4"
+    )
 
     # Replicate runtime options
     replicate_use_file_output: bool = Field(
         default=True,
         description="If True (recommended), Replicate returns FileOutput objects for file outputs.",
     )
+
+    # Optional per-stage parameter overrides (passed directly to provider clients)
+    remove_bg_params: Dict[str, Any] = Field(default_factory=dict)
+    multiview_params: Dict[str, Any] = Field(default_factory=dict)
+    depth_params: Dict[str, Any] = Field(default_factory=dict)
+    meshy_params: Dict[str, Any] = Field(default_factory=dict)
 
     # Meshy API
     meshy_base_url: str = Field(default="https://api.meshy.ai")

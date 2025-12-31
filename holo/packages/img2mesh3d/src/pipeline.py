@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -11,9 +12,9 @@ from PIL import Image
 from .artifacts import ArtifactRef, ArtifactStore, LocalArtifactStore
 from .config import PipelineConfig
 from .events import Emitter, PipelineEvent, ThreadSafeEmitter, now_ns
-from .clients.meshy_client import MeshyClient, MeshyTask
-from .clients.replicate_client import ReplicateClient
+from ai_kit.clients import MeshyClient, MeshyTask, ReplicateClient
 
+logger = logging.getLogger("img2mesh3d.pipeline")
 
 @dataclass(frozen=True)
 class PipelineResult:
@@ -68,6 +69,7 @@ class ImageTo3DPipeline:
         emit = ThreadSafeEmitter(emit)
 
         artifacts: List[ArtifactRef] = []
+        manifest_ref: Optional[ArtifactRef] = None
         manifest: Dict[str, Any] = {
             "job_id": job_id,
             "input_path": input_path,
@@ -105,6 +107,18 @@ class ImageTo3DPipeline:
             emit(PipelineEvent(kind="artifact", stage="artifact", ts_ns=now_ns(), artifact=ref.to_dict()))
             return ref
 
+        def publish_manifest() -> None:
+            nonlocal manifest_ref
+            ref = artifact_store.put_bytes(
+                name="manifest.json",
+                data=json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+                content_type="application/json",
+            )
+            if manifest_ref is None:
+                artifacts.append(ref)
+                emit(PipelineEvent(kind="artifact", stage="artifact", ts_ns=now_ns(), artifact=ref.to_dict()))
+            manifest_ref = ref
+
         workspace = out_base / "_workspace"
         workspace.mkdir(parents=True, exist_ok=True)
 
@@ -116,23 +130,36 @@ class ImageTo3DPipeline:
         img.save(normalized, format="PNG")
         publish_file("input/normalized.png", normalized, content_type="image/png")
         manifest["steps"]["normalize"] = {"normalized": "input/normalized.png"}
+        publish_manifest()
         report("normalize", 1.0)
 
         # Step 1: remove background
         report("remove_bg", 0.0, "Removing background (Replicate)")
-        bg_bytes = self.replicate.remove_background(model=self.config.remove_bg_model, image_path=normalized)
+        logger.info("remove_bg model=%s", self.config.remove_bg_model)
+        if self.config.remove_bg_params:
+            logger.debug("remove_bg params=%s", self.config.remove_bg_params)
+        bg_bytes = self.replicate.remove_background(
+            model=self.config.remove_bg_model,
+            image_path=normalized,
+            parameters=self.config.remove_bg_params,
+        )
         bg_path = workspace / "step1" / "bg_removed.png"
         _write_bytes(bg_path, bg_bytes)
         publish_file("step1/bg_removed.png", bg_path, content_type="image/png")
         manifest["steps"]["remove_bg"] = {"bg_removed": "step1/bg_removed.png"}
+        publish_manifest()
         report("remove_bg", 1.0)
 
         # Step 2: multiview
         report("multiview", 0.0, "Generating multi-view images (Replicate)")
+        logger.info("multiview model=%s", self.config.multiview_model)
+        if self.config.multiview_params:
+            logger.debug("multiview params=%s", self.config.multiview_params)
         mv = self.replicate.multiview_zero123plusplus(
             model=self.config.multiview_model,
             image_path=bg_path,
             remove_background=False,
+            parameters=self.config.multiview_params,
         )
         view_paths: List[Path] = []
         if isinstance(mv, list):
@@ -157,10 +184,14 @@ class ImageTo3DPipeline:
                 "views_grid": "step2/views_grid.png",
                 "views": [f"step2/views/view_{i:02d}.png" for i in range(len(view_paths))],
             }
+        publish_manifest()
         report("multiview", 1.0)
 
         # Step 3: depth maps (optionally concurrent)
         report("depth", 0.0, "Generating depth maps for each view (Replicate)")
+        logger.info("depth model=%s concurrency=%s", self.config.depth_model, self.config.depth_concurrency)
+        if self.config.depth_params:
+            logger.debug("depth params=%s", self.config.depth_params)
         depth_refs: List[Dict[str, str]] = []
         depth_dir = workspace / "step3" / "depth"
         depth_dir.mkdir(parents=True, exist_ok=True)
@@ -168,7 +199,11 @@ class ImageTo3DPipeline:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def _depth_for_view(i: int, view_path: Path) -> Tuple[int, Dict[str, Path]]:
-            out = self.replicate.depth_anything_v2(model=self.config.depth_model, image_path=view_path)
+            out = self.replicate.depth_anything_v2(
+                model=self.config.depth_model,
+                image_path=view_path,
+                parameters=self.config.depth_params,
+            )
             results: Dict[str, Path] = {}
             for k, b in out.items():
                 suffix = "grey" if "grey" in k else ("color" if "color" in k else k)
@@ -191,10 +226,14 @@ class ImageTo3DPipeline:
                 report("depth", done / total, f"Depth maps done: {done}/{total}")
 
         manifest["steps"]["depth"] = {"maps": depth_refs}
+        publish_manifest()
         report("depth", 1.0)
 
         # Step 4: Meshy reconstruction
         report("meshy", 0.0, "Creating Meshy multi-image-to-3d task")
+        logger.info("meshy model=multi-image-to-3d images=%s", self.config.meshy_images)
+        if self.config.meshy_params:
+            logger.debug("meshy params=%s", self.config.meshy_params)
         selected_views = self._select_views_for_meshy(view_paths)
         data_uris = [to_data_uri_png(p.read_bytes()) for p in selected_views]
         task_id = self.meshy.create_multi_image_to_3d(
@@ -203,8 +242,10 @@ class ImageTo3DPipeline:
             should_texture=self.config.should_texture,
             save_pre_remeshed_model=self.config.save_pre_remeshed_model,
             enable_pbr=self.config.enable_pbr,
+            parameters=self.config.meshy_params,
         )
         manifest["steps"]["meshy"] = {"task_id": task_id}
+        publish_manifest()
 
         def _on_update(task: MeshyTask) -> None:
             report("meshy", task.progress / 100.0, f"Meshy status={task.status} progress={task.progress}")
@@ -241,13 +282,7 @@ class ImageTo3DPipeline:
         )
 
         report("meshy", 1.0)
-
-        # Manifest (upload at end too)
-        publish_bytes(
-            "manifest.json",
-            json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
-            content_type="application/json",
-        )
+        publish_manifest()
 
         return PipelineResult(
             job_id=job_id,
