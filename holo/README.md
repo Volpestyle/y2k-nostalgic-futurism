@@ -15,7 +15,7 @@ A scaffold for a 2D → (optional multi-view) → 3D *asset bake* pipeline, desi
 - `apps/demo-web` — Example web app (upload → bake → view result).
 - `docs/` — Architecture + local/dev + deployment docs **with embedded diagrams**.
 
-> This is a scaffold: the pipeline uses Replicate + Meshy in `packages/img2mesh3d` for end-to-end wiring.
+> This is a scaffold: the pipeline uses Replicate + local reconstruction in `packages/img2mesh3d` for end-to-end wiring.
 
 ## Quick start (local dev)
 

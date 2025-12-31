@@ -5,7 +5,22 @@ A **2D image → 3D model** pipeline toolkit:
 1. **Background removal** (Replicate: `bria/remove-background`)
 2. **Multi-view generation** (Replicate: `jd7h/zero123plusplus`)
 3. **Depth maps** for each view (Replicate: `chenxwh/depth-anything-v2`)
-4. **Reconstruction** (Meshy Multi-Image to 3D → outputs **GLB** for Three.js)
+4. **Local reconstruction** (Open3D fusion → Poisson/alpha mesh + UV/texture bake → **GLB**)
+
+Local reconstruction uses **Open3D + trimesh**, with optional **pyxatlas** or **Blender CLI** for UV/texture baking.
+
+To enable texture baking on systems where pyxatlas is available:
+
+```bash
+pip install -e ".[texture]"
+```
+
+To bake textures with Blender instead:
+
+```bash
+export IMG2MESH3D_TEXTURE_BACKEND=blender
+export IMG2MESH3D_BLENDER_PATH=/Applications/Blender.app/Contents/MacOS/Blender
+```
 
 This repo is intentionally an **abstraction / toolkit**:
 - run the pipeline **locally** (sync CLI / Python API)
@@ -48,7 +63,6 @@ pip install -e ".[dev]"
 
 ### AI providers
 - `REPLICATE_API_TOKEN`
-- `MESHY_API_KEY`
 
 ### AWS async runner (API + worker)
 - `IMG2MESH3D_QUEUE_URL` (SQS queue URL)
@@ -73,8 +87,8 @@ img2mesh3d run \
   --input ./examples/chair.png \
   --out ./runs/demo \
   --depth-concurrency 2 \
-  --meshy-images 4 \
-  --pbr
+  --recon-method poisson \
+  --texture
 ```
 
 Artifacts are written to the `--out` folder.
@@ -125,7 +139,7 @@ The worker:
 
 ## Three.js consumption
 
-The job artifacts include a `model.glb` from Meshy, directly renderable in Three.js with `GLTFLoader`.
+The job artifacts include a `model.glb` rendered locally, directly usable in Three.js with `GLTFLoader`.
 The API returns S3 keys; you can generate presigned URLs (helper provided in `img2mesh3d.aws.s3`).
 
 ---
