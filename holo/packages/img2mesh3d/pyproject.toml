@@ -52,7 +52,6 @@ packages = [
   "img2mesh3d",
   "img2mesh3d.api",
   "img2mesh3d.aws",
-  "img2mesh3d.clients",
   "img2mesh3d.jobs",
 ]
 
