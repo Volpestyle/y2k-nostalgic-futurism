@@ -116,7 +116,7 @@ export function App() {
     let cancelled = false;
     const loadModels = async () => {
       try {
-        const data = await client.listProviderModels();
+        const data = await client.listProviderModels({ allowFallback: false });
         if (cancelled) return;
         setModels(data);
         setModelsError(null);
@@ -310,6 +310,14 @@ export function App() {
   async function startBake() {
     setError(null);
     if (!file) return;
+    if (!modelsLoaded) {
+      setError("Model list still loading.");
+      return;
+    }
+    if (modelsError) {
+      setError(`Model list error: ${modelsError}`);
+      return;
+    }
 
     const useCutoutApi = cutoutSource === "api" && cutoutProviderValue && cutoutApiModelValue;
     const useDepthApi = depthSource === "api" && depthProviderValue && depthApiModelValue;
@@ -747,7 +755,11 @@ export function App() {
                   <Hint>No vision-capable models available from ai-kit.</Hint>
                 )}
               </Group>
-              <Button disabled={!file} onClick={startBake}>
+              <Button
+                disabled={!file || !modelsLoaded || Boolean(modelsError)}
+                title={modelsError || (!modelsLoaded ? "Model list still loading." : undefined)}
+                onClick={startBake}
+              >
                 Start bake
               </Button>
 
