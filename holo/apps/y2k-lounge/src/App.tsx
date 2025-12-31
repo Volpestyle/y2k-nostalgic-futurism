@@ -168,6 +168,7 @@ export function App() {
   const [dockContent, setDockContent] = useState<DockContent>(() =>
     (readActivePage() ?? "lounge") === "create-models" ? "visualizer" : "model"
   );
+  const stageContent = dockContent === "visualizer" ? "model" : "visualizer";
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
@@ -344,6 +345,7 @@ export function App() {
         className="loungeApp"
         data-sidebar={sidebarOpen ? "open" : "closed"}
         data-page={activePage}
+        data-stage={stageContent}
         data-resizing={sidebarResizing ? "true" : "false"}
         style={sidebarStyle}
       >

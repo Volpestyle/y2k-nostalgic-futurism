@@ -24,6 +24,7 @@ export type ViewerControlsOptions = {
   minDistance?: number;
   maxDistance?: number;
   target?: [number, number, number];
+  lockPanTarget?: boolean;
 };
 
 const DEFAULT_POST: Required<PostParams> = {
@@ -56,6 +57,7 @@ export class BasicGltfViewer {
   private hologramMaterial?: THREE.MeshBasicMaterial;
   private post?: PostProcessing;
   private postEnabled = false;
+  private lockPanTarget = false;
 
   constructor(opts: ViewerOptions) {
     const { canvas, dpr = Math.min(window.devicePixelRatio || 1, 2) } = opts;
@@ -118,6 +120,7 @@ export class BasicGltfViewer {
     if (options.dampingFactor !== undefined) this.controls.dampingFactor = options.dampingFactor;
     if (options.minDistance !== undefined) this.controls.minDistance = options.minDistance;
     if (options.maxDistance !== undefined) this.controls.maxDistance = options.maxDistance;
+    if (options.lockPanTarget !== undefined) this.lockPanTarget = options.lockPanTarget;
     if (options.target) {
       this.controls.target.set(options.target[0], options.target[1], options.target[2]);
     }
@@ -163,7 +166,9 @@ export class BasicGltfViewer {
 
     if (panOffset.lengthSq() === 0) return;
     camera.position.add(panOffset);
-    target.add(panOffset);
+    if (!this.lockPanTarget) {
+      target.add(panOffset);
+    }
     this.controls.update();
   }
 

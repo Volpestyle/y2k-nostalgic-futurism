@@ -92,6 +92,14 @@ body {
   background: radial-gradient(circle at 70% 20%, var(--lounge-stage-sheen), transparent 55%);
 }
 
+.loungeApp[data-stage="model"] .loungeStage {
+  right: var(--lounge-sidebar-width);
+}
+
+.loungeApp[data-stage="model"][data-sidebar="closed"] .loungeStage {
+  right: var(--lounge-sidebar-rail);
+}
+
 .loungeStageSlot {
   position: absolute;
   inset: 0;
@@ -1131,25 +1139,14 @@ body[data-theme="light"] .hudArtifactPlaceholder {
   --hud-progress-stage-count-minus-one: 4;
   --hud-progress-stage-gap: 4px;
   --hud-progress-stage-padding: 2px;
-  --hud-progress-offset: calc(
-    var(--hud-progress-stage-padding) +
-      (
-        100% -
-          (var(--hud-progress-stage-padding) * 2) -
-          (var(--hud-progress-stage-gap) * var(--hud-progress-stage-count-minus-one))
-      ) /
-      (var(--hud-progress-stage-count) * 2)
-  );
-  --hud-progress-span: calc(100% - (var(--hud-progress-offset) * 2));
+  --hud-progress-offset: 0px;
+  --hud-progress-span: 100%;
   margin-top: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.hudProgressContainer[data-status="done"] {
-  --hud-progress-offset: 0px;
-}
 
 .hudProgressHeader {
   display: flex;

@@ -670,12 +670,15 @@ export function CreateModelsPanel({
       dampingFactor: visualizerControls.dampingFactor,
       minPolarAngle: 0,
       maxPolarAngle: Math.PI,
+      lockPanTarget: true,
       target: [0, 0, 0],
     });
     viewerRef.current = viewer;
 
     const onResize = () => viewer.resize();
     window.addEventListener("resize", onResize);
+    const resizeObserver = new ResizeObserver(() => viewer.resize());
+    resizeObserver.observe(canvas);
     viewer.resize();
 
     const handleWheel = (event: WheelEvent) => {
@@ -688,6 +691,7 @@ export function CreateModelsPanel({
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => {
       window.removeEventListener("resize", onResize);
+      resizeObserver.disconnect();
       canvas.removeEventListener("wheel", handleWheel);
       viewer.dispose();
       viewerRef.current = null;
@@ -1128,6 +1132,21 @@ export function CreateModelsPanel({
       })).filter((item) => typeof item.progress === "number"),
     [stageProgress]
   );
+  const activeStage = useMemo(() => {
+    let lastStage: string | null = null;
+    for (const stage of PIPELINE_STAGES) {
+      const value = stageProgress[stage];
+      if (typeof value === "number") {
+        lastStage = stage;
+        if (value < 1) {
+          return stage;
+        }
+      } else if (lastStage) {
+        break;
+      }
+    }
+    return lastStage;
+  }, [stageProgress]);
 
   useEffect(() => {
     if (!availableVisionModels.length) return;
@@ -2714,8 +2733,8 @@ export function CreateModelsPanel({
               {status === "queued" && "Queued for processing..."}
               {status === "loading" && "Loading job..."}
               {status === "running" &&
-                (eventLog[0]?.stage
-                  ? `${eventLog[0].stage.replace(/_/g, " ")}...`
+                (activeStage
+                  ? `${activeStage.replace(/_/g, " ")}...`
                   : "Processing...")}
               {status === "done" && "Complete"}
               {status === "error" && "Error occurred"}
@@ -2743,7 +2762,7 @@ export function CreateModelsPanel({
               const stageData = stageProgressItems.find(
                 (s) => s.stage === stage
               );
-              const isActive = eventLog[0]?.stage === stage;
+              const isActive = activeStage === stage;
               const isComplete = (stageData?.progress ?? 0) >= 1;
               const hasStarted = stageData !== undefined;
               return (
