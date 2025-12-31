@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -9,7 +10,14 @@ from typing import Any, Dict, Optional
 import boto3
 from botocore.exceptions import ClientError
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+
+from dataclasses import asdict
+
+from ai_kit.catalog import load_catalog_models
+from ai_kit.pricing import load_scraped_models
+from ai_kit.types import ModelCapabilities, ModelMetadata, TokenPrices
 
 from ..aws.s3 import presign_s3_url
 from ..config import AwsConfig
@@ -18,6 +26,33 @@ from ..jobs.runner_sqs import SqsJobRunner
 from ..jobs.store_dynamodb import JobStoreDynamoDB
 
 app = FastAPI(title="img2mesh3d", version="0.2.0")
+logger = logging.getLogger("img2mesh3d.api")
+
+
+def _cors_origins() -> list[str]:
+    raw = os.getenv("IMG2MESH3D_CORS_ORIGINS", "").strip()
+    if not raw:
+        return ["*"]
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _configure_logging() -> None:
+    level_name = os.getenv("IMG2MESH3D_LOG_LEVEL", "info").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("img2mesh3d").setLevel(level)
+    logger.setLevel(level)
+
+
+_configure_logging()
 
 LOCAL_BASE_DIR = Path(os.getenv("IMG2MESH3D_LOCAL_DIR", "local-data/img2mesh3d")).resolve()
 LOCAL_STORE = LocalJobStore(base_dir=LOCAL_BASE_DIR)
@@ -62,16 +97,41 @@ def _parse_json_dict(raw: Optional[str], *, label: str) -> Optional[Dict[str, An
 
 
 def _bake_spec_to_overrides(spec: Dict[str, Any]) -> Dict[str, Any]:
+    aliases = {
+        "cutout": {
+            "rmbg-1.4": "bria/remove-background",
+        },
+        "views": {
+            "stable-zero123": "jd7h/zero123plusplus:c69c6559a29011b576f1ff0371b3bc1add2856480c60520c7e9ce0b40a6e9052",
+            "zero123-xl": "jd7h/zero123plusplus:c69c6559a29011b576f1ff0371b3bc1add2856480c60520c7e9ce0b40a6e9052",
+        },
+        "depth": {
+            "depth-anything-v2-small": "chenxwh/depth-anything-v2:b239ea33cff32bb7abb5db39ffe9a09c14cbc2894331d1ef66fe096eed88ebd4",
+            "depth-anything-v2-large": "chenxwh/depth-anything-v2:b239ea33cff32bb7abb5db39ffe9a09c14cbc2894331d1ef66fe096eed88ebd4",
+        },
+    }
+
+    def _alias(stage: str, model_id: Optional[str]) -> Optional[str]:
+        if not model_id:
+            return None
+        return aliases.get(stage, {}).get(model_id, model_id)
+
     overrides: Dict[str, Any] = {}
     cutout = spec.get("cutout") or {}
     depth = spec.get("depth") or {}
     views = spec.get("views") or {}
     if isinstance(cutout, dict) and cutout.get("model"):
-        overrides["remove_bg_model"] = str(cutout["model"])
+        overrides["remove_bg_model"] = str(_alias("cutout", str(cutout["model"])))
+    if isinstance(cutout, dict) and isinstance(cutout.get("parameters"), dict):
+        overrides["remove_bg_params"] = cutout["parameters"]
     if isinstance(depth, dict) and depth.get("model"):
-        overrides["depth_model"] = str(depth["model"])
+        overrides["depth_model"] = str(_alias("depth", str(depth["model"])))
+    if isinstance(depth, dict) and isinstance(depth.get("parameters"), dict):
+        overrides["depth_params"] = depth["parameters"]
     if isinstance(views, dict) and views.get("model"):
-        overrides["multiview_model"] = str(views["model"])
+        overrides["multiview_model"] = str(_alias("views", str(views["model"])))
+    if isinstance(views, dict) and isinstance(views.get("parameters"), dict):
+        overrides["multiview_params"] = views["parameters"]
     if isinstance(views, dict) and isinstance(views.get("count"), (int, float)):
         count = int(views["count"])
         overrides["meshy_images"] = max(1, min(4, count))
@@ -138,6 +198,82 @@ def _build_depth_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
     return {"version": 1, "format": "png", "views": views}
 
 
+def _model_available(provider: str) -> bool:
+    key_env = {
+        "openai": ("AI_KIT_OPENAI_API_KEY", "OPENAI_API_KEY"),
+        "anthropic": ("AI_KIT_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+        "google": ("AI_KIT_GOOGLE_API_KEY", "GOOGLE_API_KEY"),
+        "xai": ("AI_KIT_XAI_API_KEY", "XAI_API_KEY"),
+        "replicate": ("AI_KIT_REPLICATE_API_KEY", "REPLICATE_API_TOKEN"),
+        "fal": ("AI_KIT_FAL_API_KEY", "FAL_API_KEY", "FAL_KEY"),
+        "meshy": ("AI_KIT_MESHY_API_KEY", "MESHY_API_KEY"),
+    }
+    env_keys = key_env.get(provider)
+    if not env_keys:
+        return True
+    return any(os.getenv(key) for key in env_keys)
+
+
+def _load_scraped_model_metadata() -> list[ModelMetadata]:
+    curated = load_scraped_models()
+    output: list[ModelMetadata] = []
+    for entry in curated:
+        if not isinstance(entry, dict):
+            continue
+        model_id = entry.get("id")
+        provider = entry.get("provider")
+        if not model_id or not provider:
+            continue
+        caps = entry.get("capabilities") or {}
+        token_prices = entry.get("tokenPrices") or {}
+        output.append(
+            ModelMetadata(
+                id=str(model_id),
+                displayName=str(entry.get("displayName") or model_id),
+                provider=str(provider),
+                capabilities=ModelCapabilities(
+                    text=bool(caps.get("text")),
+                    vision=bool(caps.get("vision")),
+                    image=bool(caps.get("image")),
+                    tool_use=bool(caps.get("tool_use")),
+                    structured_output=bool(caps.get("structured_output")),
+                    reasoning=bool(caps.get("reasoning")),
+                ),
+                family=str(entry.get("family")) if entry.get("family") else None,
+                contextWindow=entry.get("contextWindow")
+                if isinstance(entry.get("contextWindow"), int)
+                else None,
+                tokenPrices=TokenPrices(
+                    input=token_prices.get("input"),
+                    output=token_prices.get("output"),
+                )
+                if isinstance(token_prices, dict)
+                else None,
+                deprecated=entry.get("deprecated") if "deprecated" in entry else None,
+                inPreview=entry.get("inPreview") if "inPreview" in entry else None,
+            )
+        )
+    return output
+
+
+@app.get("/v1/ai/provider-models")
+def list_provider_models(providers: Optional[str] = None) -> list[Dict[str, Any]]:
+    models = load_catalog_models() + _load_scraped_model_metadata()
+    selected = None
+    if providers:
+        selected = {p.strip() for p in providers.split(",") if p.strip()}
+    payload: list[Dict[str, Any]] = []
+    for model in models:
+        if not isinstance(model, ModelMetadata):
+            continue
+        if selected and model.provider not in selected:
+            continue
+        item = asdict(model)
+        item["available"] = _model_available(model.provider)
+        payload.append(item)
+    return payload
+
+
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
     return {"ok": "true"}
@@ -185,6 +321,13 @@ async def create_job(
             filename=upload.filename or "input.png",
             pipeline_config=overrides,
         )
+        logger.info(
+            "create_job local job_id=%s filename=%s overrides_keys=%s",
+            job_id,
+            upload.filename or "input.png",
+            sorted(overrides.keys()),
+        )
+        logger.debug("create_job overrides=%s", overrides)
         return {"job_id": job_id}
 
     aws = _get_aws()
@@ -195,6 +338,13 @@ async def create_job(
         filename=upload.filename or "input.png",
         pipeline_config=overrides,
     )
+    logger.info(
+        "create_job aws job_id=%s filename=%s overrides_keys=%s",
+        job_id,
+        upload.filename or "input.png",
+        sorted(overrides.keys()),
+    )
+    logger.debug("create_job overrides=%s", overrides)
     return {"job_id": job_id}
 
 
@@ -245,7 +395,7 @@ def get_job(job_id: str, presign: bool = True) -> Dict[str, Any]:
 
 
 @app.get("/v1/jobs/{job_id}/result")
-def get_result(job_id: str) -> FileResponse | RedirectResponse:
+def get_result(job_id: str) -> Response:
     if _use_local_mode():
         path = LOCAL_BASE_DIR / job_id / "meshy" / "model.glb"
         if not path.exists():
@@ -265,7 +415,7 @@ def get_result(job_id: str) -> FileResponse | RedirectResponse:
 
 
 @app.get("/v1/jobs/{job_id}/artifacts/{path:path}")
-def get_artifact(job_id: str, path: str) -> JSONResponse | FileResponse | RedirectResponse:
+def get_artifact(job_id: str, path: str) -> Response:
     req_path = path.strip("/")
     if req_path == "views.json":
         manifest = _load_manifest_local(job_id) if _use_local_mode() else _load_manifest_aws(_get_aws(), job_id)

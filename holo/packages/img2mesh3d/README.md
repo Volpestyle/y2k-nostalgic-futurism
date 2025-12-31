@@ -28,6 +28,10 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 
+# clients live in ai-kit
+pip install -e /path/to/ai-kit/packages/python
+pip install -e /path/to/ai-kit/packages/python-inference
+
 # base toolkit (sync pipeline + AWS job runner primitives)
 pip install -e .
 

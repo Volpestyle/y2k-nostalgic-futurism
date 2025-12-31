@@ -8,6 +8,8 @@ This repo runs on **img2mesh3d** for both the API and pipeline execution.
 cd packages/img2mesh3d
 python -m venv .venv
 source .venv/bin/activate
+pip install -e /path/to/ai-kit/packages/python
+pip install -e /path/to/ai-kit/packages/python-inference
 pip install -e ".[api]"
 ```
 

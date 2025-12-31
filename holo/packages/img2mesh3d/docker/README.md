@@ -13,6 +13,10 @@ docker run --rm -p 8080:8080 \
   img2mesh3d-api
 ```
 
+Note: the API depends on the `ai-kit` Python packages for provider clients. Install them in the
+image (e.g. add `pip install -e /path/to/ai-kit/packages/python` and
+`pip install -e /path/to/ai-kit/packages/python-inference` steps).
+
 ## Worker
 
 ```bash
