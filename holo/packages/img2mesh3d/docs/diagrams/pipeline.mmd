@@ -2,5 +2,5 @@ flowchart TD
   A[Input image] --> B[Remove background\nReplicate: bria/remove-background]
   B --> C[Generate multi-views\nReplicate: jd7h/zero123plusplus]
   C --> D[Depth for each view\nReplicate: chenxwh/depth-anything-v2]
-  D --> E[Reconstruction\nMeshy: multi-image-to-3d]
+  D --> E[Reconstruction\nOpen3D: fuse → mesh → texture]
   E --> F[GLB model\nThree.js renderable]

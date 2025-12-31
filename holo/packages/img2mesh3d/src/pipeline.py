@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,16 +12,42 @@ from PIL import Image
 from .artifacts import ArtifactRef, ArtifactStore, LocalArtifactStore
 from .config import PipelineConfig
 from .events import Emitter, PipelineEvent, ThreadSafeEmitter, now_ns
-from ai_kit.clients import MeshyClient, MeshyTask, ReplicateClient
+from .local_recon import LocalReconstructor
+from ai_kit.clients import ReplicateClient
 
 logger = logging.getLogger("img2mesh3d.pipeline")
+
+
+def _infer_grid_layout(width: int, height: int) -> Tuple[int, int]:
+    if width >= height:
+        return 2, 3
+    return 3, 2
+
+
+def _split_grid_image(grid_png: bytes) -> List[bytes]:
+    with Image.open(BytesIO(grid_png)) as image:
+        width, height = image.size
+        rows, cols = _infer_grid_layout(width, height)
+        tile_w = width // cols
+        tile_h = height // rows
+        tiles: List[bytes] = []
+        for row in range(rows):
+            for col in range(cols):
+                left = col * tile_w
+                upper = row * tile_h
+                right = width if col == cols - 1 else (col + 1) * tile_w
+                lower = height if row == rows - 1 else (row + 1) * tile_h
+                tile = image.crop((left, upper, right, lower))
+                buf = BytesIO()
+                tile.save(buf, format="PNG")
+                tiles.append(buf.getvalue())
+        return tiles
 
 @dataclass(frozen=True)
 class PipelineResult:
     job_id: Optional[str]
     artifacts: List[ArtifactRef]
     glb: Optional[ArtifactRef]
-    meshy_task_id: Optional[str]
     manifest: Dict[str, Any]
 
 
@@ -31,11 +57,9 @@ class ImageTo3DPipeline:
         config: Optional[PipelineConfig] = None,
         *,
         replicate_client: Optional[ReplicateClient] = None,
-        meshy_client: Optional[MeshyClient] = None,
     ):
         self.config = config or PipelineConfig.from_env()
         self.replicate = replicate_client or ReplicateClient(use_file_output=self.config.replicate_use_file_output)
-        self.meshy = meshy_client or MeshyClient(base_url=self.config.meshy_base_url)
 
     def run(
         self,
@@ -82,7 +106,7 @@ class ImageTo3DPipeline:
             "remove_bg": 0.18,
             "multiview": 0.25,
             "depth": 0.25,
-            "meshy": 0.30,
+            "recon": 0.30,
         }
         completed = {k: 0.0 for k in weights.keys()}
 
@@ -163,18 +187,36 @@ class ImageTo3DPipeline:
         )
         view_paths: List[Path] = []
         if isinstance(mv, list):
-            for i, b in enumerate(mv):
-                p = workspace / "step2" / "views" / f"view_{i:02d}.png"
-                _write_bytes(p, b)
-                publish_file(f"step2/views/view_{i:02d}.png", p, content_type="image/png")
-                view_paths.append(p)
-            manifest["steps"]["multiview"] = {"views": [f"step2/views/view_{i:02d}.png" for i in range(len(mv))]}
+            if len(mv) == 1:
+                # Some models return a single grid image as a list with one entry.
+                grid_path = workspace / "step2" / "views_grid.png"
+                _write_bytes(grid_path, mv[0])
+                publish_file("step2/views_grid.png", grid_path, content_type="image/png")
+                views = _split_grid_image(grid_png=mv[0])
+                for i, b in enumerate(views):
+                    p = workspace / "step2" / "views" / f"view_{i:02d}.png"
+                    _write_bytes(p, b)
+                    publish_file(f"step2/views/view_{i:02d}.png", p, content_type="image/png")
+                    view_paths.append(p)
+                manifest["steps"]["multiview"] = {
+                    "views_grid": "step2/views_grid.png",
+                    "views": [f"step2/views/view_{i:02d}.png" for i in range(len(view_paths))],
+                }
+            else:
+                for i, b in enumerate(mv):
+                    p = workspace / "step2" / "views" / f"view_{i:02d}.png"
+                    _write_bytes(p, b)
+                    publish_file(f"step2/views/view_{i:02d}.png", p, content_type="image/png")
+                    view_paths.append(p)
+                manifest["steps"]["multiview"] = {
+                    "views": [f"step2/views/view_{i:02d}.png" for i in range(len(mv))]
+                }
         else:
             # single "grid" output; store it and split into 2x3 views by default
             grid_path = workspace / "step2" / "views_grid.png"
             _write_bytes(grid_path, mv)
             publish_file("step2/views_grid.png", grid_path, content_type="image/png")
-            views = ReplicateClient.split_grid_image(grid_png=mv, rows=2, cols=3)
+            views = _split_grid_image(grid_png=mv)
             for i, b in enumerate(views):
                 p = workspace / "step2" / "views" / f"view_{i:02d}.png"
                 _write_bytes(p, b)
@@ -193,6 +235,7 @@ class ImageTo3DPipeline:
         if self.config.depth_params:
             logger.debug("depth params=%s", self.config.depth_params)
         depth_refs: List[Dict[str, str]] = []
+        depth_paths: Dict[int, Path] = {}
         depth_dir = workspace / "step3" / "depth"
         depth_dir.mkdir(parents=True, exist_ok=True)
 
@@ -222,6 +265,12 @@ class ImageTo3DPipeline:
                     name = "grey_depth" if "grey" in k else ("color_depth" if "color" in k else k)
                     ref = publish_file(f"step3/depth/{name}_{i:02d}.png", p, content_type="image/png")
                     depth_refs.append({"kind": name, "index": str(i), "path": ref.name})
+                    if "grey" in k:
+                        depth_paths[i] = p
+                    elif "color" in k and i not in depth_paths:
+                        depth_paths[i] = p
+                    elif i not in depth_paths:
+                        depth_paths[i] = p
                 done += 1
                 report("depth", done / total, f"Depth maps done: {done}/{total}")
 
@@ -229,104 +278,33 @@ class ImageTo3DPipeline:
         publish_manifest()
         report("depth", 1.0)
 
-        # Step 4: Meshy reconstruction
-        report("meshy", 0.0, "Creating Meshy multi-image-to-3d task")
-        logger.info("meshy model=multi-image-to-3d images=%s", self.config.meshy_images)
-        if self.config.meshy_params:
-            logger.debug("meshy params=%s", self.config.meshy_params)
-        selected_views = self._select_views_for_meshy(view_paths)
-        data_uris = [to_data_uri_png(p.read_bytes()) for p in selected_views]
-        task_id = self.meshy.create_multi_image_to_3d(
-            image_urls=data_uris,
-            should_remesh=self.config.should_remesh,
-            should_texture=self.config.should_texture,
-            save_pre_remeshed_model=self.config.save_pre_remeshed_model,
-            enable_pbr=self.config.enable_pbr,
-            parameters=self.config.meshy_params,
-        )
-        manifest["steps"]["meshy"] = {"task_id": task_id}
-        publish_manifest()
+        # Step 4: local reconstruction
+        report("recon", 0.0, "Reconstructing mesh locally")
+        logger.info("recon method=%s fusion=%s", self.config.recon_method, self.config.recon_fusion)
+        recon = LocalReconstructor(self.config)
+        recon_out = recon.run(view_paths=view_paths, depth_paths=depth_paths, out_dir=workspace / "recon")
 
-        def _on_update(task: MeshyTask) -> None:
-            report("meshy", task.progress / 100.0, f"Meshy status={task.status} progress={task.progress}")
-
-        task = self.meshy.wait_multi_image_to_3d(
-            task_id=task_id,
-            poll_interval_s=self.config.meshy_poll_interval_s,
-            timeout_s=self.config.meshy_timeout_s,
-            on_update=_on_update,
-        )
-
-        # Download GLB
         glb_ref: Optional[ArtifactRef] = None
-        glb_url = task.model_url("glb")
-        if glb_url:
-            glb_bytes = self.meshy.download_url(glb_url)
-            glb_path = workspace / "meshy" / "model.glb"
-            _write_bytes(glb_path, glb_bytes)
-            glb_ref = publish_file("meshy/model.glb", glb_path, content_type="model/gltf-binary")
+        manifest["steps"]["recon"] = {}
+        if recon_out.mesh_path:
+            glb_ref = publish_file("recon/model.glb", recon_out.mesh_path, content_type="model/gltf-binary")
+            manifest["steps"]["recon"]["glb"] = "recon/model.glb"
+        if recon_out.texture_path:
+            publish_file("recon/albedo.png", recon_out.texture_path, content_type="image/png")
+            manifest["steps"]["recon"]["albedo"] = "recon/albedo.png"
+        if recon_out.point_cloud_path:
+            publish_file("recon/points.ply", recon_out.point_cloud_path, content_type="application/octet-stream")
+            manifest["steps"]["recon"]["points"] = "recon/points.ply"
 
-        # Download thumbnail if present
-        thumb_url = task.thumbnail_url()
-        if thumb_url:
-            tb = self.meshy.download_url(thumb_url)
-            thumb_path = workspace / "meshy" / "thumbnail.png"
-            _write_bytes(thumb_path, tb)
-            publish_file("meshy/thumbnail.png", thumb_path, content_type="image/png")
-
-        # Also save raw task json
-        publish_bytes(
-            "meshy/task.json",
-            json.dumps(task.raw, ensure_ascii=False, indent=2).encode("utf-8"),
-            content_type="application/json",
-        )
-
-        report("meshy", 1.0)
+        report("recon", 1.0)
         publish_manifest()
 
         return PipelineResult(
             job_id=job_id,
             artifacts=artifacts,
             glb=glb_ref,
-            meshy_task_id=task_id,
             manifest=manifest,
         )
-
-    def _select_views_for_meshy(self, view_paths: List[Path]) -> List[Path]:
-        if not view_paths:
-            raise RuntimeError("No views available for Meshy reconstruction")
-
-        if self.config.meshy_view_indices is not None:
-            idx = [i for i in self.config.meshy_view_indices if i < len(view_paths)]
-            if not idx:
-                idx = list(range(min(self.config.meshy_images, len(view_paths))))
-            return [view_paths[i] for i in idx[: self.config.meshy_images]]
-
-        # Default: spread across the set
-        n = len(view_paths)
-        if n <= self.config.meshy_images:
-            return view_paths
-
-        step = n / self.config.meshy_images
-        indices = [int(i * step) for i in range(self.config.meshy_images)]
-        indices = [min(n - 1, i) for i in indices]
-
-        uniq: List[int] = []
-        for i in indices:
-            if i not in uniq:
-                uniq.append(i)
-        while len(uniq) < self.config.meshy_images:
-            cand = len(uniq)
-            if cand < n and cand not in uniq:
-                uniq.append(cand)
-            else:
-                break
-        return [view_paths[i] for i in uniq[: self.config.meshy_images]]
-
-
-def to_data_uri_png(data: bytes) -> str:
-    b64 = base64.b64encode(data).decode("ascii")
-    return f"data:image/png;base64,{b64}"
 
 
 def _write_bytes(path: Path, data: bytes) -> None:

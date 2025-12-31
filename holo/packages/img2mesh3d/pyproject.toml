@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "img2mesh3d"
 version = "0.2.0"
-description = "2D image to 3D pipeline toolkit (Replicate multi-view + depth + Meshy reconstruction) with AWS SQS job runner"
+description = "2D image to 3D pipeline toolkit (Replicate multi-view + depth + local reconstruction) with AWS SQS job runner"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "img2mesh3d contributors" }]
-keywords = ["3d", "meshy", "replicate", "threejs", "aws", "sqs", "dynamodb", "s3"]
+keywords = ["3d", "replicate", "threejs", "aws", "sqs", "dynamodb", "s3"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
@@ -19,6 +19,8 @@ classifiers = [
 
 dependencies = [
   "boto3>=1.28.0",
+  "numpy>=1.24.0",
+  "open3d>=0.18.0",
   "pillow>=10.0.0",
   "pydantic>=2.0.0",
   "requests>=2.31.0",
@@ -26,6 +28,7 @@ dependencies = [
   "tenacity>=8.2.0",
   "typer>=0.12.0",
   "replicate>=1.0.0",
+  "trimesh>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +36,9 @@ api = [
   "fastapi>=0.110.0",
   "uvicorn>=0.23.0",
   "python-multipart>=0.0.9",
+]
+texture = [
+  "pyxatlas>=0.4.0",
 ]
 dev = [
   "pytest>=8.0.0",

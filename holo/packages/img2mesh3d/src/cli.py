@@ -24,14 +24,28 @@ def run(
     input: Path = typer.Option(..., "--input", exists=True, readable=True, help="Input image path"),
     out: Path = typer.Option(..., "--out", help="Output folder for artifacts"),
     depth_concurrency: int = typer.Option(2, "--depth-concurrency", help="Depth map concurrency (threads)"),
-    meshy_images: int = typer.Option(4, "--meshy-images", help="How many views to send to Meshy (1-4)"),
-    pbr: bool = typer.Option(True, "--pbr/--no-pbr", help="Enable PBR textures (Meshy)"),
+    recon_method: str = typer.Option("poisson", "--recon-method", help="Reconstruction method (poisson|alpha)"),
+    recon_fusion: str = typer.Option("points", "--recon-fusion", help="Fusion mode (points|tsdf)"),
+    recon_images: Optional[int] = typer.Option(None, "--recon-images", help="Max views to use for reconstruction"),
+    texture: bool = typer.Option(True, "--texture/--no-texture", help="Bake UVs + texture"),
+    texture_backend: str = typer.Option("auto", "--texture-backend", help="Texture backend (auto|pyxatlas|blender|none)"),
+    blender_path: Optional[str] = typer.Option(None, "--blender-path", help="Override Blender executable path"),
 ):
     """
     Run the pipeline synchronously and write artifacts locally.
     """
     cfg = PipelineConfig.from_env()
-    cfg = cfg.model_copy(update={"depth_concurrency": depth_concurrency, "meshy_images": meshy_images, "enable_pbr": pbr})
+    cfg = cfg.model_copy(
+        update={
+            "depth_concurrency": depth_concurrency,
+            "recon_method": recon_method,
+            "recon_fusion": recon_fusion,
+            "recon_images": recon_images,
+            "texture_enabled": texture,
+            "texture_backend": texture_backend,
+            "blender_path": blender_path,
+        }
+    )
 
     pipeline = ImageTo3DPipeline(cfg)
 
@@ -68,9 +82,11 @@ def run(
 def submit(
     input: Path = typer.Option(..., "--input", exists=True, readable=True),
     filename: Optional[str] = typer.Option(None, "--filename", help="Override uploaded filename"),
-    meshy_images: Optional[int] = typer.Option(None, "--meshy-images"),
+    recon_images: Optional[int] = typer.Option(None, "--recon-images"),
     depth_concurrency: Optional[int] = typer.Option(None, "--depth-concurrency"),
-    pbr: Optional[bool] = typer.Option(None, "--pbr/--no-pbr"),
+    texture: Optional[bool] = typer.Option(None, "--texture/--no-texture"),
+    texture_backend: Optional[str] = typer.Option(None, "--texture-backend"),
+    blender_path: Optional[str] = typer.Option(None, "--blender-path"),
 ):
     """
     Submit an async job to AWS (SQS).
@@ -85,12 +101,16 @@ def submit(
     runner = SqsJobRunner(aws=aws, store=store)
 
     overrides: Dict[str, Any] = {}
-    if meshy_images is not None:
-        overrides["meshy_images"] = int(meshy_images)
+    if recon_images is not None:
+        overrides["recon_images"] = int(recon_images)
     if depth_concurrency is not None:
         overrides["depth_concurrency"] = int(depth_concurrency)
-    if pbr is not None:
-        overrides["enable_pbr"] = bool(pbr)
+    if texture is not None:
+        overrides["texture_enabled"] = bool(texture)
+    if texture_backend is not None:
+        overrides["texture_backend"] = texture_backend
+    if blender_path is not None:
+        overrides["blender_path"] = blender_path
 
     job_id = runner.submit_image_bytes(
         image_bytes=input.read_bytes(),
