@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { ArcballControls } from "three/addons/controls/ArcballControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 import { PostProcessing, type PostParams } from "./post/PostProcessing";
@@ -21,7 +21,6 @@ export type ViewerControlsOptions = {
   enablePan?: boolean;
   enableZoom?: boolean;
   dampingFactor?: number;
-  screenSpacePanning?: boolean;
   minDistance?: number;
   maxDistance?: number;
   target?: [number, number, number];
@@ -42,7 +41,7 @@ export class BasicGltfViewer {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
-  private controls: OrbitControls;
+  private controls: ArcballControls;
   private loader: GLTFLoader;
   private plyLoader: PLYLoader;
   private gltfRoot?: THREE.Object3D;
@@ -70,8 +69,9 @@ export class BasicGltfViewer {
     this.camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.01, 100);
     this.camera.position.set(0, 0, 2.2);
 
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.enableDamping = true;
+    this.controls = new ArcballControls(this.camera, canvas, this.scene);
+    this.controls.setGizmosVisible(false);
+    this.controls.enableAnimations = true;
 
     this.loader = new GLTFLoader();
     this.plyLoader = new PLYLoader();
@@ -107,17 +107,15 @@ export class BasicGltfViewer {
     }
   }
 
-  setScreenSpacePanning(enabled: boolean) {
-    this.setControlsOptions({ screenSpacePanning: enabled });
+  /** @deprecated ArcballControls always uses screen-space panning */
+  setScreenSpacePanning(_enabled: boolean) {
+    // No-op: ArcballControls uses screen-space panning by default
   }
 
   setControlsOptions(options: ViewerControlsOptions) {
     if (options.enablePan !== undefined) this.controls.enablePan = options.enablePan;
     if (options.enableZoom !== undefined) this.controls.enableZoom = options.enableZoom;
     if (options.dampingFactor !== undefined) this.controls.dampingFactor = options.dampingFactor;
-    if (options.screenSpacePanning !== undefined) {
-      this.controls.screenSpacePanning = options.screenSpacePanning;
-    }
     if (options.minDistance !== undefined) this.controls.minDistance = options.minDistance;
     if (options.maxDistance !== undefined) this.controls.maxDistance = options.maxDistance;
     if (options.target) {
@@ -140,11 +138,8 @@ export class BasicGltfViewer {
 
     const applyPan = (distanceX: number, distanceY: number) => {
       panLeft.setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-distanceX);
-      if (this.controls.screenSpacePanning) {
-        panUp.setFromMatrixColumn(camera.matrix, 1);
-      } else {
-        panUp.setFromMatrixColumn(camera.matrix, 0).crossVectors(camera.up, panUp);
-      }
+      // ArcballControls uses screen-space panning by default
+      panUp.setFromMatrixColumn(camera.matrix, 1);
       panUp.multiplyScalar(distanceY);
       panOffset.add(panLeft).add(panUp);
     };

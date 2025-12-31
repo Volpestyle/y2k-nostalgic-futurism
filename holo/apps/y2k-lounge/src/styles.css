@@ -1127,10 +1127,28 @@ body[data-theme="light"] .hudArtifactPlaceholder {
 
 /* Progress Bar Component */
 .hudProgressContainer {
+  --hud-progress-stage-count: 5;
+  --hud-progress-stage-count-minus-one: 4;
+  --hud-progress-stage-gap: 4px;
+  --hud-progress-stage-padding: 2px;
+  --hud-progress-offset: calc(
+    var(--hud-progress-stage-padding) +
+      (
+        100% -
+          (var(--hud-progress-stage-padding) * 2) -
+          (var(--hud-progress-stage-gap) * var(--hud-progress-stage-count-minus-one))
+      ) /
+      (var(--hud-progress-stage-count) * 2)
+  );
+  --hud-progress-span: calc(100% - (var(--hud-progress-offset) * 2));
   margin-top: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.hudProgressContainer[data-status="done"] {
+  --hud-progress-offset: 0px;
 }
 
 .hudProgressHeader {
@@ -1190,8 +1208,10 @@ body[data-theme="light"] .hudProgressBarOuter {
 
 .hudProgressBarInner {
   position: absolute;
-  inset: 0;
-  width: calc(var(--progress, 0) * 100%);
+  top: 0;
+  bottom: 0;
+  left: var(--hud-progress-offset);
+  width: calc(var(--progress, 0) * var(--hud-progress-span));
   background: linear-gradient(
     90deg,
     var(--lounge-accent) 0%,
@@ -1228,8 +1248,8 @@ body[data-theme="light"] .hudProgressBarOuter {
   position: absolute;
   top: -4px;
   bottom: -4px;
-  left: 0;
-  width: calc(var(--progress, 0) * 100%);
+  left: var(--hud-progress-offset);
+  width: calc(var(--progress, 0) * var(--hud-progress-span));
   background: linear-gradient(
     90deg,
     transparent 0%,
@@ -1319,8 +1339,8 @@ body[data-theme="light"] .hudRebuildProgressTrack {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 4px;
-  padding: 0 2px;
+  gap: var(--hud-progress-stage-gap);
+  padding: 0 var(--hud-progress-stage-padding);
 }
 
 .hudProgressStage {
