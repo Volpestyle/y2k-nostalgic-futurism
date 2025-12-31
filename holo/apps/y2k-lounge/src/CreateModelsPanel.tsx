@@ -1,5 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createHoloClient, type JobStatusResponse, type ModelInputSpec, type ModelMetadata } from "@holo/sdk";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  createHoloClient,
+  type JobStatusResponse,
+  type ModelInputSpec,
+  type ModelMetadata,
+} from "@holo/sdk";
 import { BasicGltfViewer, type RenderMode } from "@holo/viewer-three";
 import { BakeSpecSchema } from "@holo/shared-spec";
 import {
@@ -16,14 +27,13 @@ import {
   Range,
   Select,
   Status,
-  Textarea
+  Textarea,
 } from "@holo/ui-kit";
 import { parseNpyFloat32 } from "./npy";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(
-  /\/$/,
-  ""
-);
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"
+).replace(/\/$/, "");
 const client = createHoloClient(API_BASE_URL);
 const defaultCaptionPrompt =
   "Describe the subject and materials in this image for 3D reconstruction. Keep it brief.";
@@ -83,6 +93,9 @@ const getBasename = (raw: string) => {
 const depthModelUsesInverse = (modelId: string) =>
   modelId.toLowerCase().includes("depth-anything");
 
+const viewsModelUsesFixedViews = (modelId: string) =>
+  modelId.toLowerCase().includes("zero123");
+
 const buildDepthPreview = (
   data: Float32Array,
   shape: number[],
@@ -93,8 +106,12 @@ const buildDepthPreview = (
   const width = shape[1] ?? 0;
   if (!height || !width) return null;
 
-  let min = Number.isFinite(depthMin) ? (depthMin as number) : Number.POSITIVE_INFINITY;
-  let max = Number.isFinite(depthMax) ? (depthMax as number) : Number.NEGATIVE_INFINITY;
+  let min = Number.isFinite(depthMin)
+    ? (depthMin as number)
+    : Number.POSITIVE_INFINITY;
+  let max = Number.isFinite(depthMax)
+    ? (depthMax as number)
+    : Number.NEGATIVE_INFINITY;
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
     for (let i = 0; i < data.length; i += 1) {
       const value = data[i];
@@ -117,7 +134,8 @@ const buildDepthPreview = (
 
   for (let i = 0; i < data.length; i += 1) {
     const value = data[i];
-    const normalized = Number.isFinite(value) && value > 0 ? (value - min) / span : 0;
+    const normalized =
+      Number.isFinite(value) && value > 0 ? (value - min) / span : 0;
     const color = Math.max(0, Math.min(255, Math.round(normalized * 255)));
     const idx = i * 4;
     imageData.data[idx] = color;
@@ -141,11 +159,15 @@ const safeParseJson = (raw: string) => {
 const parseParameters = (raw: string) => {
   if (!raw.trim()) return null;
   const parsed = safeParseJson(raw);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return null;
   return parsed as Record<string, unknown>;
 };
 
-const resolveInputValue = (input: ModelInputSpec, params: Record<string, unknown>) => {
+const resolveInputValue = (
+  input: ModelInputSpec,
+  params: Record<string, unknown>
+) => {
   const raw = params[input.name];
   if (raw === undefined) {
     if (input.default !== undefined) return input.default;
@@ -191,7 +213,7 @@ const ModelInputsEditor = ({
   inputs,
   parametersRaw,
   setParametersRaw,
-  disabled
+  disabled,
 }: ModelInputsEditorProps) => {
   if (!inputs || inputs.length === 0) return null;
   const parsed = parseParameters(parametersRaw);
@@ -209,7 +231,13 @@ const ModelInputsEditor = ({
             <Label key={input.name} className="ui-toggle">
               <Checkbox
                 checked={value}
-                onChange={(e) => upsertParameterValue(setParametersRaw, input.name, e.target.checked)}
+                onChange={(e) =>
+                  upsertParameterValue(
+                    setParametersRaw,
+                    input.name,
+                    e.target.checked
+                  )
+                }
                 disabled={disabled}
               />
               {label}
@@ -223,7 +251,13 @@ const ModelInputsEditor = ({
               {label}
               <Select
                 value={value}
-                onChange={(e) => upsertParameterValue(setParametersRaw, input.name, e.target.value)}
+                onChange={(e) =>
+                  upsertParameterValue(
+                    setParametersRaw,
+                    input.name,
+                    e.target.value
+                  )
+                }
                 disabled={disabled}
               >
                 {(input.options || []).map((option) => (
@@ -249,7 +283,8 @@ const ModelInputsEditor = ({
                 step={input.step}
                 placeholder={input.placeholder}
                 onChange={(e) => {
-                  const next = e.target.value === "" ? "" : Number(e.target.value);
+                  const next =
+                    e.target.value === "" ? "" : Number(e.target.value);
                   upsertParameterValue(setParametersRaw, input.name, next);
                 }}
                 disabled={disabled}
@@ -266,7 +301,13 @@ const ModelInputsEditor = ({
                 rows={2}
                 value={value}
                 placeholder={input.placeholder}
-                onChange={(e) => upsertParameterValue(setParametersRaw, input.name, e.target.value)}
+                onChange={(e) =>
+                  upsertParameterValue(
+                    setParametersRaw,
+                    input.name,
+                    e.target.value
+                  )
+                }
                 disabled={disabled}
               />
             </Label>
@@ -278,14 +319,22 @@ const ModelInputsEditor = ({
             <Input
               value={value}
               placeholder={input.placeholder}
-              onChange={(e) => upsertParameterValue(setParametersRaw, input.name, e.target.value)}
+              onChange={(e) =>
+                upsertParameterValue(
+                  setParametersRaw,
+                  input.name,
+                  e.target.value
+                )
+              }
               disabled={disabled}
             />
           </Label>
         );
       })}
       {hasInvalid && (
-        <Hint>Parameters JSON is invalid. Editing model inputs will replace it.</Hint>
+        <Hint>
+          Parameters JSON is invalid. Editing model inputs will replace it.
+        </Hint>
       )}
     </>
   );
@@ -295,7 +344,8 @@ const getModelLabel = (model: ModelMetadata | undefined, fallback: string) => {
   return model?.displayName || model?.id || fallback;
 };
 
-const isModelAvailable = (model: ModelMetadata | undefined) => model?.available !== false;
+const isModelAvailable = (model: ModelMetadata | undefined) =>
+  model?.available !== false;
 
 const getApiModelLabel = (model: ModelMetadata) => {
   const label = getModelLabel(model, model.id);
@@ -308,7 +358,9 @@ const findModelById = (
   modelId: string | undefined
 ) => {
   if (!provider || !modelId) return undefined;
-  return models.find((model) => model.provider === provider && model.id === modelId);
+  return models.find(
+    (model) => model.provider === provider && model.id === modelId
+  );
 };
 
 const PROVIDER_KEY_HINTS: Record<string, string> = {
@@ -318,7 +370,6 @@ const PROVIDER_KEY_HINTS: Record<string, string> = {
   xai: "AI_KIT_XAI_API_KEY or XAI_API_KEY",
   replicate: "AI_KIT_REPLICATE_API_KEY or REPLICATE_API_TOKEN",
   fal: "AI_KIT_FAL_API_KEY, FAL_API_KEY, or FAL_KEY",
-  meshy: "AI_KIT_MESHY_API_KEY or MESHY_API_KEY"
 };
 
 const getProviderKeyHint = (provider: string | undefined) => {
@@ -353,12 +404,13 @@ const groupModelsByProvider = (models: ModelMetadata[]) => {
         const aLabel = a.displayName || a.id;
         const bLabel = b.displayName || b.id;
         return aLabel.localeCompare(bLabel);
-      })
+      }),
     }))
     .sort((a, b) => a.provider.localeCompare(b.provider));
 };
 
-const buildApiKey = (provider: string, model: string) => `${provider}::${model}`;
+const buildApiKey = (provider: string, model: string) =>
+  `${provider}::${model}`;
 
 const parseApiKey = (raw: string) => {
   const [provider, model] = raw.split("::");
@@ -448,7 +500,7 @@ export function CreateModelsPanel({
   stageCanvasRef,
   modelFile,
   onModelFileChange,
-  canvasLocation
+  canvasLocation,
 }: CreateModelsPanelProps) {
   const viewerRef = useRef<BasicGltfViewer | null>(null);
   const storedPipelineSettings = useMemo(() => readPipelineStorage(), []);
@@ -467,20 +519,29 @@ export function CreateModelsPanel({
   const [cutoutPreview, setCutoutPreview] = useState<string | null>(null);
   const [viewsManifest, setViewsManifest] = useState<ViewManifest | null>(null);
   const [depthManifest, setDepthManifest] = useState<ViewManifest | null>(null);
-  const [depthPreviewImage, setDepthPreviewImage] = useState<string | null>(null);
+  const [depthPreviewImage, setDepthPreviewImage] = useState<string | null>(
+    null
+  );
   const [depthMaps, setDepthMaps] = useState<Record<string, string>>({});
   const [pointsUrl, setPointsUrl] = useState<string | null>(null);
   const [eventStreamState, setEventStreamState] = useState<
     "idle" | "connecting" | "connected" | "error"
   >("idle");
   const [eventLog, setEventLog] = useState<JobEventEntry[]>([]);
-  const [stageProgress, setStageProgress] = useState<Record<string, number>>({});
+  const [stageProgress, setStageProgress] = useState<Record<string, number>>(
+    {}
+  );
   const cutoutPreviewRef = useRef<string | null>(null);
   const depthPreviewRef = useRef<string | null>(null);
   const depthMapUrlsRef = useRef<string[]>([]);
   const depthMapsRef = useRef<Record<string, string>>({});
   const pointsLoadedRef = useRef<string | null>(null);
-  const artifactsLoadedRef = useRef({ cutout: false, views: false, depth: false, points: false });
+  const artifactsLoadedRef = useRef({
+    cutout: false,
+    views: false,
+    depth: false,
+    points: false,
+  });
   const eventIdRef = useRef<number>(0);
   const refreshTimerRef = useRef<number | null>(null);
   const statusRef = useRef(status);
@@ -501,7 +562,9 @@ export function CreateModelsPanel({
     storedPipelineSettings?.cutoutApiModelOverride || ""
   );
   const [cutoutPrompt, setCutoutPrompt] = useState(defaultCutoutPrompt);
-  const [cutoutSize, setCutoutSize] = useState(storedPipelineSettings?.cutoutSize || "");
+  const [cutoutSize, setCutoutSize] = useState(
+    storedPipelineSettings?.cutoutSize || ""
+  );
   const [cutoutParametersRaw, setCutoutParametersRaw] = useState(
     storedPipelineSettings?.cutoutParameters || ""
   );
@@ -521,7 +584,9 @@ export function CreateModelsPanel({
     storedPipelineSettings?.depthApiModelOverride || ""
   );
   const [depthPrompt, setDepthPrompt] = useState(defaultDepthPrompt);
-  const [depthSize, setDepthSize] = useState(storedPipelineSettings?.depthSize || "");
+  const [depthSize, setDepthSize] = useState(
+    storedPipelineSettings?.depthSize || ""
+  );
   const [depthParametersRaw, setDepthParametersRaw] = useState(
     storedPipelineSettings?.depthParameters || ""
   );
@@ -532,7 +597,8 @@ export function CreateModelsPanel({
     if (typeof storedPipelineSettings?.depthInvert === "boolean") {
       return storedPipelineSettings.depthInvert;
     }
-    const modelId = storedPipelineSettings?.depthModel || "chenxwh/depth-anything-v2";
+    const modelId =
+      storedPipelineSettings?.depthModel || "chenxwh/depth-anything-v2";
     return depthModelUsesInverse(modelId);
   });
   const [viewsSource, setViewsSource] = useState<PipelineSource>(() =>
@@ -561,7 +627,7 @@ export function CreateModelsPanel({
     storedPipelineSettings?.reconMethod || "poisson"
   );
   const [reconProvider, setReconProvider] = useState(
-    storedPipelineSettings?.reconProvider || "meshy"
+    storedPipelineSettings?.reconProvider || ""
   );
   const [reconApiModel, setReconApiModel] = useState(
     storedPipelineSettings?.reconApiModel || ""
@@ -585,6 +651,8 @@ export function CreateModelsPanel({
   const [captionProvider, setCaptionProvider] = useState("openai");
   const [captionModel, setCaptionModel] = useState("gpt-4o-mini");
   const [captionPrompt, setCaptionPrompt] = useState(defaultCaptionPrompt);
+  const [rebuildRunning, setRebuildRunning] = useState(false);
+  const [rebuildError, setRebuildError] = useState<string | null>(null);
 
   useEffect(() => {
     const canvas = stageCanvasRef.current;
@@ -635,7 +703,12 @@ export function CreateModelsPanel({
   }, []);
 
   useEffect(() => {
-    artifactsLoadedRef.current = { cutout: false, views: false, depth: false, points: false };
+    artifactsLoadedRef.current = {
+      cutout: false,
+      views: false,
+      depth: false,
+      points: false,
+    };
     depthMapsRef.current = {};
     for (const url of depthMapUrlsRef.current) {
       URL.revokeObjectURL(url);
@@ -675,7 +748,11 @@ export function CreateModelsPanel({
     const viewer = viewerRef.current;
     if (!viewer || status !== "done") return;
     viewer.setRenderMode(renderMode);
-    if (renderMode === "points" && pointsUrl && pointsLoadedRef.current !== pointsUrl) {
+    if (
+      renderMode === "points" &&
+      pointsUrl &&
+      pointsLoadedRef.current !== pointsUrl
+    ) {
       pointsLoadedRef.current = pointsUrl;
       viewer.loadPointCloud(pointsUrl).catch(() => {
         pointsLoadedRef.current = null;
@@ -707,11 +784,17 @@ export function CreateModelsPanel({
   }, []);
 
   const visionModels = useMemo(
-    () => models.filter((model) => model.provider !== "catalog" && model.capabilities?.vision),
+    () =>
+      models.filter(
+        (model) => model.provider !== "catalog" && model.capabilities?.vision
+      ),
     [models]
   );
   const imageModels = useMemo(
-    () => models.filter((model) => model.provider !== "catalog" && model.capabilities?.image),
+    () =>
+      models.filter(
+        (model) => model.provider !== "catalog" && model.capabilities?.image
+      ),
     [models]
   );
   const availableVisionModels = useMemo(
@@ -739,16 +822,24 @@ export function CreateModelsPanel({
     [catalogModels]
   );
   const visionProviderOptions = useMemo(() => {
-    return Array.from(new Set(visionModels.map((model) => model.provider))).sort();
+    return Array.from(
+      new Set(visionModels.map((model) => model.provider))
+    ).sort();
   }, [visionModels]);
   const availableVisionProviderOptions = useMemo(() => {
-    return Array.from(new Set(availableVisionModels.map((model) => model.provider))).sort();
+    return Array.from(
+      new Set(availableVisionModels.map((model) => model.provider))
+    ).sort();
   }, [availableVisionModels]);
   const imageProviderOptions = useMemo(() => {
-    return Array.from(new Set(imageModels.map((model) => model.provider))).sort();
+    return Array.from(
+      new Set(imageModels.map((model) => model.provider))
+    ).sort();
   }, [imageModels]);
   const availableImageProviderOptions = useMemo(() => {
-    return Array.from(new Set(availableImageModels.map((model) => model.provider))).sort();
+    return Array.from(
+      new Set(availableImageModels.map((model) => model.provider))
+    ).sort();
   }, [availableImageModels]);
   const cutoutApiModels = useMemo(
     () => filterModelsByFamily(imageModels, "cutout"),
@@ -763,7 +854,10 @@ export function CreateModelsPanel({
     [imageModels]
   );
   const reconApiModels = useMemo(
-    () => models.filter((model) => model.provider !== "catalog" && model.family === "recon"),
+    () =>
+      models.filter(
+        (model) => model.provider !== "catalog" && model.family === "recon"
+      ),
     [models]
   );
   const availableReconApiModels = useMemo(
@@ -771,10 +865,14 @@ export function CreateModelsPanel({
     [reconApiModels]
   );
   const reconProviderOptions = useMemo(() => {
-    return Array.from(new Set(reconApiModels.map((model) => model.provider))).sort();
+    return Array.from(
+      new Set(reconApiModels.map((model) => model.provider))
+    ).sort();
   }, [reconApiModels]);
   const availableReconProviderOptions = useMemo(() => {
-    return Array.from(new Set(availableReconApiModels.map((model) => model.provider))).sort();
+    return Array.from(
+      new Set(availableReconApiModels.map((model) => model.provider))
+    ).sort();
   }, [availableReconApiModels]);
   const availableCutoutProviderModels = useMemo(() => {
     return filterModelsByFamily(
@@ -795,10 +893,14 @@ export function CreateModelsPanel({
     );
   }, [availableImageModels, viewsProvider]);
   const availableReconProviderModels = useMemo(() => {
-    return availableReconApiModels.filter((model) => model.provider === reconProvider);
+    return availableReconApiModels.filter(
+      (model) => model.provider === reconProvider
+    );
   }, [availableReconApiModels, reconProvider]);
   const availableProviderModels = useMemo(() => {
-    return availableVisionModels.filter((model) => model.provider === captionProvider);
+    return availableVisionModels.filter(
+      (model) => model.provider === captionProvider
+    );
   }, [availableVisionModels, captionProvider]);
   const apiModelGroups = useMemo(() => {
     return groupModelsByProvider(visionModels);
@@ -819,11 +921,16 @@ export function CreateModelsPanel({
     () => groupModelsByProvider(reconApiModels),
     [reconApiModels]
   );
-  const isCutoutProviderAvailable = availableImageProviderOptions.includes(cutoutProvider);
-  const isDepthProviderAvailable = availableImageProviderOptions.includes(depthProvider);
-  const isViewsProviderAvailable = availableImageProviderOptions.includes(viewsProvider);
-  const isReconProviderAvailable = availableReconProviderOptions.includes(reconProvider);
-  const isCaptionProviderAvailable = availableVisionProviderOptions.includes(captionProvider);
+  const isCutoutProviderAvailable =
+    availableImageProviderOptions.includes(cutoutProvider);
+  const isDepthProviderAvailable =
+    availableImageProviderOptions.includes(depthProvider);
+  const isViewsProviderAvailable =
+    availableImageProviderOptions.includes(viewsProvider);
+  const isReconProviderAvailable =
+    availableReconProviderOptions.includes(reconProvider);
+  const isCaptionProviderAvailable =
+    availableVisionProviderOptions.includes(captionProvider);
   const cutoutProviderHint = getProviderKeyHint(cutoutProvider);
   const depthProviderHint = getProviderKeyHint(depthProvider);
   const viewsProviderHint = getProviderKeyHint(viewsProvider);
@@ -832,22 +939,38 @@ export function CreateModelsPanel({
   const cutoutProviderValue = isCutoutProviderAvailable ? cutoutProvider : "";
   const cutoutApiModelValue =
     cutoutApiModelOverride.trim() ||
-    (isCutoutProviderAvailable && availableCutoutProviderModels.length > 0 ? cutoutApiModel : "");
+    (isCutoutProviderAvailable && availableCutoutProviderModels.length > 0
+      ? cutoutApiModel
+      : "");
   const depthProviderValue = isDepthProviderAvailable ? depthProvider : "";
   const depthApiModelValue =
     depthApiModelOverride.trim() ||
-    (isDepthProviderAvailable && availableDepthProviderModels.length > 0 ? depthApiModel : "");
+    (isDepthProviderAvailable && availableDepthProviderModels.length > 0
+      ? depthApiModel
+      : "");
   const viewsProviderValue = isViewsProviderAvailable ? viewsProvider : "";
   const viewsApiModelValue =
     viewsApiModelOverride.trim() ||
-    (isViewsProviderAvailable && availableViewsProviderModels.length > 0 ? viewsApiModel : "");
+    (isViewsProviderAvailable && availableViewsProviderModels.length > 0
+      ? viewsApiModel
+      : "");
+  const selectedViewsModelId =
+    viewsSource === "api" ? viewsApiModelValue : viewsModelValue;
+  const isZero123ppViews =
+    !!selectedViewsModelId && viewsModelUsesFixedViews(selectedViewsModelId);
   const reconProviderValue = isReconProviderAvailable ? reconProvider : "";
   const reconApiModelValue =
     reconApiModelOverride.trim() ||
-    (isReconProviderAvailable && availableReconProviderModels.length > 0 ? reconApiModel : "");
-  const captionProviderValue = isCaptionProviderAvailable ? captionProvider : "";
+    (isReconProviderAvailable && availableReconProviderModels.length > 0
+      ? reconApiModel
+      : "");
+  const captionProviderValue = isCaptionProviderAvailable
+    ? captionProvider
+    : "";
   const captionModelValue =
-    isCaptionProviderAvailable && availableProviderModels.length > 0 ? captionModel : "";
+    isCaptionProviderAvailable && availableProviderModels.length > 0
+      ? captionModel
+      : "";
   const viewsModelValue = viewsOptions.length > 0 ? viewsModel : "";
   const cutoutApiSelection =
     cutoutProviderValue && cutoutApiModelValue
@@ -874,13 +997,25 @@ export function CreateModelsPanel({
       return findModelById(models, "catalog", cutoutModel);
     }
     return findModelById(models, cutoutProviderValue, cutoutApiModelValue);
-  }, [models, cutoutSource, cutoutModel, cutoutProviderValue, cutoutApiModelValue]);
+  }, [
+    models,
+    cutoutSource,
+    cutoutModel,
+    cutoutProviderValue,
+    cutoutApiModelValue,
+  ]);
   const selectedViewsModel = useMemo(() => {
     if (viewsSource === "local") {
       return findModelById(models, "catalog", viewsModelValue);
     }
     return findModelById(models, viewsProviderValue, viewsApiModelValue);
-  }, [models, viewsSource, viewsModelValue, viewsProviderValue, viewsApiModelValue]);
+  }, [
+    models,
+    viewsSource,
+    viewsModelValue,
+    viewsProviderValue,
+    viewsApiModelValue,
+  ]);
   const selectedDepthModel = useMemo(() => {
     if (depthSource === "local") {
       return findModelById(models, "catalog", depthModel);
@@ -895,7 +1030,10 @@ export function CreateModelsPanel({
   }, [models, reconSource, reconProviderValue, reconApiModelValue]);
   const apiSelectionError = useMemo(() => {
     const missing = [];
-    if (cutoutSource === "api" && (!cutoutProviderValue || !cutoutApiModelValue)) {
+    if (
+      cutoutSource === "api" &&
+      (!cutoutProviderValue || !cutoutApiModelValue)
+    ) {
       missing.push("Cutout");
     }
     if (depthSource === "api" && (!depthProviderValue || !depthApiModelValue)) {
@@ -927,7 +1065,7 @@ export function CreateModelsPanel({
     reconApiModelValue,
     captionEnabled,
     captionProviderValue,
-    captionModelValue
+    captionModelValue,
   ]);
   const artifactBase = useMemo(() => {
     if (!jobId) return null;
@@ -945,11 +1083,13 @@ export function CreateModelsPanel({
     return views.map((view, index) => {
       const fallbackId = `view_${String(index).padStart(3, "0")}`;
       const id = view.id || fallbackId;
-      const imageName = view.image_path ? getBasename(view.image_path) : `${id}.png`;
+      const imageName = view.image_path
+        ? getBasename(view.image_path)
+        : `${id}.png`;
       return {
         id,
         label: id.replace(/^view_/, "View "),
-        url: getArtifactUrl(`views/${imageName}`)
+        url: getArtifactUrl(`views/${imageName}`),
       };
     });
   }, [viewsManifest, getArtifactUrl]);
@@ -964,12 +1104,12 @@ export function CreateModelsPanel({
         label: id.replace(/^view_/, "View "),
         depthMin: view.depth_min,
         depthMax: view.depth_max,
-        depthUrl: depthName ? getArtifactUrl(`depth/${depthName}`) : ""
+        depthUrl: depthName ? getArtifactUrl(`depth/${depthName}`) : "",
       };
     });
   }, [depthManifest, getArtifactUrl]);
   const stageProgressItems = useMemo(() => {
-    const order = ["normalize", "remove_bg", "multiview", "depth", "meshy"];
+    const order = ["normalize", "remove_bg", "multiview", "depth", "recon"];
     return order
       .map((stage) => ({ stage, progress: stageProgress[stage] }))
       .filter((item) => typeof item.progress === "number");
@@ -977,35 +1117,45 @@ export function CreateModelsPanel({
 
   useEffect(() => {
     if (!availableVisionModels.length) return;
-    if (!availableVisionModels.some((model) => model.provider === captionProvider)) {
+    if (
+      !availableVisionModels.some((model) => model.provider === captionProvider)
+    ) {
       setCaptionProvider(availableVisionModels[0].provider);
     }
   }, [availableVisionModels, captionProvider]);
 
   useEffect(() => {
     if (!availableImageModels.length) return;
-    if (!availableImageModels.some((model) => model.provider === cutoutProvider)) {
+    if (
+      !availableImageModels.some((model) => model.provider === cutoutProvider)
+    ) {
       setCutoutProvider(availableImageModels[0].provider);
     }
   }, [availableImageModels, cutoutProvider]);
 
   useEffect(() => {
     if (!availableImageModels.length) return;
-    if (!availableImageModels.some((model) => model.provider === depthProvider)) {
+    if (
+      !availableImageModels.some((model) => model.provider === depthProvider)
+    ) {
       setDepthProvider(availableImageModels[0].provider);
     }
   }, [availableImageModels, depthProvider]);
 
   useEffect(() => {
     if (!availableImageModels.length) return;
-    if (!availableImageModels.some((model) => model.provider === viewsProvider)) {
+    if (
+      !availableImageModels.some((model) => model.provider === viewsProvider)
+    ) {
       setViewsProvider(availableImageModels[0].provider);
     }
   }, [availableImageModels, viewsProvider]);
 
   useEffect(() => {
     if (!availableReconApiModels.length) return;
-    if (!availableReconApiModels.some((model) => model.provider === reconProvider)) {
+    if (
+      !availableReconApiModels.some((model) => model.provider === reconProvider)
+    ) {
       setReconProvider(availableReconApiModels[0].provider);
     }
   }, [availableReconApiModels, reconProvider]);
@@ -1041,7 +1191,11 @@ export function CreateModelsPanel({
 
   useEffect(() => {
     if (!availableCutoutProviderModels.length) return;
-    if (!availableCutoutProviderModels.some((model) => model.id === cutoutApiModel)) {
+    if (
+      !availableCutoutProviderModels.some(
+        (model) => model.id === cutoutApiModel
+      )
+    ) {
       setCutoutApiModel(availableCutoutProviderModels[0].id);
     }
   }, [availableCutoutProviderModels, cutoutApiModel]);
@@ -1056,7 +1210,9 @@ export function CreateModelsPanel({
 
   useEffect(() => {
     if (!availableDepthProviderModels.length) return;
-    if (!availableDepthProviderModels.some((model) => model.id === depthApiModel)) {
+    if (
+      !availableDepthProviderModels.some((model) => model.id === depthApiModel)
+    ) {
       setDepthApiModel(availableDepthProviderModels[0].id);
     }
   }, [availableDepthProviderModels, depthApiModel]);
@@ -1071,10 +1227,19 @@ export function CreateModelsPanel({
 
   useEffect(() => {
     if (!availableViewsProviderModels.length) return;
-    if (!availableViewsProviderModels.some((model) => model.id === viewsApiModel)) {
+    if (
+      !availableViewsProviderModels.some((model) => model.id === viewsApiModel)
+    ) {
       setViewsApiModel(availableViewsProviderModels[0].id);
     }
   }, [availableViewsProviderModels, viewsApiModel]);
+
+  useEffect(() => {
+    if (!isZero123ppViews) return;
+    if (viewsCount !== 6) {
+      setViewsCount(6);
+    }
+  }, [isZero123ppViews, viewsCount]);
 
   useEffect(() => {
     const override = viewsApiModelOverride.trim();
@@ -1086,7 +1251,9 @@ export function CreateModelsPanel({
 
   useEffect(() => {
     if (!availableReconProviderModels.length) return;
-    if (!availableReconProviderModels.some((model) => model.id === reconApiModel)) {
+    if (
+      !availableReconProviderModels.some((model) => model.id === reconApiModel)
+    ) {
       setReconApiModel(availableReconProviderModels[0].id);
     }
   }, [availableReconProviderModels, reconApiModel]);
@@ -1136,7 +1303,7 @@ export function CreateModelsPanel({
       reconApiModelOverride,
       reconPrompt,
       reconFormat,
-      reconParameters: reconParametersRaw
+      reconParameters: reconParametersRaw,
     });
   }, [
     cutoutSource,
@@ -1167,7 +1334,7 @@ export function CreateModelsPanel({
     reconApiModelOverride,
     reconPrompt,
     reconFormat,
-    reconParametersRaw
+    reconParametersRaw,
   ]);
 
   const loadRecentJobs = useCallback(async () => {
@@ -1203,7 +1370,9 @@ export function CreateModelsPanel({
 
     if (!artifactsLoadedRef.current.cutout) {
       try {
-        const res = await fetch(getArtifactUrl("cutout.png"), { cache: "no-store" });
+        const res = await fetch(getArtifactUrl("cutout.png"), {
+          cache: "no-store",
+        });
         if (res.ok) {
           const blob = await res.blob();
           if (cutoutPreviewRef.current) {
@@ -1221,11 +1390,17 @@ export function CreateModelsPanel({
 
     if (!artifactsLoadedRef.current.views) {
       try {
-        const res = await fetch(getArtifactUrl("views.json"), { cache: "no-store" });
+        const res = await fetch(getArtifactUrl("views.json"), {
+          cache: "no-store",
+        });
         if (res.ok) {
           const raw = await res.text();
           const manifest = safeParseJson(raw);
-          if (manifest && Array.isArray(manifest.views) && manifest.views.length > 0) {
+          if (
+            manifest &&
+            Array.isArray(manifest.views) &&
+            manifest.views.length > 0
+          ) {
             setViewsManifest(manifest as ViewManifest);
             artifactsLoadedRef.current.views = true;
           }
@@ -1237,16 +1412,23 @@ export function CreateModelsPanel({
 
     if (!artifactsLoadedRef.current.depth) {
       try {
-        const res = await fetch(getArtifactUrl("depth.json"), { cache: "no-store" });
+        const res = await fetch(getArtifactUrl("depth.json"), {
+          cache: "no-store",
+        });
         if (res.ok) {
           const contentType = res.headers.get("content-type") ?? "";
-          if (contentType.includes("application/json") || contentType.includes("text/")) {
+          if (
+            contentType.includes("application/json") ||
+            contentType.includes("text/")
+          ) {
             const raw = await res.text();
             const manifest = safeParseJson(raw);
             if (
               manifest &&
               Array.isArray(manifest.views) &&
-              manifest.views.some((view: ViewManifestEntry) => Boolean(view.depth_path))
+              manifest.views.some((view: ViewManifestEntry) =>
+                Boolean(view.depth_path)
+              )
             ) {
               setDepthManifest(manifest as ViewManifest);
               artifactsLoadedRef.current.depth = true;
@@ -1269,7 +1451,10 @@ export function CreateModelsPanel({
 
     if (!artifactsLoadedRef.current.points) {
       try {
-        const res = await fetch(getArtifactUrl("points.ply"), { method: "HEAD", cache: "no-store" });
+        const res = await fetch(getArtifactUrl("points.ply"), {
+          method: "HEAD",
+          cache: "no-store",
+        });
         if (res.ok) {
           setPointsUrl(getArtifactUrl("points.ply"));
           artifactsLoadedRef.current.points = true;
@@ -1300,7 +1485,10 @@ export function CreateModelsPanel({
           const res = await fetch(item.depthUrl, { cache: "no-store" });
           if (!res.ok) continue;
           const contentType = res.headers.get("content-type") ?? "";
-          if (contentType.includes("image/") || item.depthUrl.endsWith(".png")) {
+          if (
+            contentType.includes("image/") ||
+            item.depthUrl.endsWith(".png")
+          ) {
             const blob = await res.blob();
             const url = URL.createObjectURL(blob);
             depthMapUrlsRef.current.push(url);
@@ -1311,7 +1499,12 @@ export function CreateModelsPanel({
           }
           const buffer = await res.arrayBuffer();
           const { data, shape } = parseNpyFloat32(buffer);
-          const preview = buildDepthPreview(data, shape, item.depthMin, item.depthMax);
+          const preview = buildDepthPreview(
+            data,
+            shape,
+            item.depthMin,
+            item.depthMax
+          );
           if (!preview || cancelled) continue;
           setDepthMaps((prev) => ({ ...prev, [item.id]: preview }));
         } catch {
@@ -1355,10 +1548,14 @@ export function CreateModelsPanel({
       return;
     }
 
-    const useCutoutApi = cutoutSource === "api" && cutoutProviderValue && cutoutApiModelValue;
-    const useDepthApi = depthSource === "api" && depthProviderValue && depthApiModelValue;
-    const useViewsApi = viewsSource === "api" && viewsProviderValue && viewsApiModelValue;
-    const useReconApi = reconSource === "api" && reconProviderValue && reconApiModelValue;
+    const useCutoutApi =
+      cutoutSource === "api" && cutoutProviderValue && cutoutApiModelValue;
+    const useDepthApi =
+      depthSource === "api" && depthProviderValue && depthApiModelValue;
+    const useViewsApi =
+      viewsSource === "api" && viewsProviderValue && viewsApiModelValue;
+    const useReconApi =
+      reconSource === "api" && reconProviderValue && reconApiModelValue;
     const cutoutParameters = parseParameters(cutoutParametersRaw);
     if (cutoutParametersRaw.trim() && !cutoutParameters) {
       setError("Cutout parameters must be valid JSON.");
@@ -1374,8 +1571,13 @@ export function CreateModelsPanel({
       setError("View parameters must be valid JSON.");
       return;
     }
-    const reconParameters = reconSource === "api" ? parseParameters(reconParametersRaw) : null;
-    if (reconSource === "api" && reconParametersRaw.trim() && !reconParameters) {
+    const reconParameters =
+      reconSource === "api" ? parseParameters(reconParametersRaw) : null;
+    if (
+      reconSource === "api" &&
+      reconParametersRaw.trim() &&
+      !reconParameters
+    ) {
       setError("Recon parameters must be valid JSON.");
       return;
     }
@@ -1386,13 +1588,13 @@ export function CreateModelsPanel({
           model: cutoutApiModelValue,
           prompt: cutoutPrompt,
           size: cutoutSize || undefined,
-          parameters: cutoutParameters || undefined
+          parameters: cutoutParameters || undefined,
         }
       : {
           model: cutoutModel,
           prompt: cutoutPrompt,
           size: cutoutSize || undefined,
-          parameters: cutoutParameters || undefined
+          parameters: cutoutParameters || undefined,
         };
     const depthConfig = useDepthApi
       ? {
@@ -1400,19 +1602,19 @@ export function CreateModelsPanel({
           model: depthApiModelValue,
           prompt: depthPrompt,
           size: depthSize || undefined,
-          parameters: depthParameters || undefined
+          parameters: depthParameters || undefined,
         }
       : {
           model: depthModel,
           prompt: depthPrompt,
           depthInvert,
           size: depthSize || undefined,
-          parameters: depthParameters || undefined
+          parameters: depthParameters || undefined,
         };
     const viewsConfig: Record<string, unknown> = {
       count: viewsCount,
       prompt: viewsPrompt,
-      parameters: viewsParameters || undefined
+      parameters: viewsParameters || undefined,
     };
     if (useViewsApi) {
       viewsConfig.provider = viewsProviderValue;
@@ -1423,8 +1625,8 @@ export function CreateModelsPanel({
 
     const reconConfig: Record<string, unknown> = {
       points: {
-        enabled: pointsEnabled
-      }
+        enabled: pointsEnabled,
+      },
     };
     if (useReconApi) {
       reconConfig.provider = reconProviderValue;
@@ -1449,9 +1651,9 @@ export function CreateModelsPanel({
           enabled: captionEnabled,
           provider: captionProvider,
           model: captionModel,
-          prompt: captionPrompt
-        }
-      }
+          prompt: captionPrompt,
+        },
+      },
     });
 
     setStatus("uploading");
@@ -1459,13 +1661,12 @@ export function CreateModelsPanel({
     if (cutoutParameters) pipelineConfig.remove_bg_params = cutoutParameters;
     if (depthParameters) pipelineConfig.depth_params = depthParameters;
     if (viewsParameters) pipelineConfig.multiview_params = viewsParameters;
-    if (reconSource === "api" && reconParameters) pipelineConfig.meshy_params = reconParameters;
 
     const hasPipelineConfig = Object.keys(pipelineConfig).length > 0;
     const { jobId } = await client.createJob({
       image: modelFile,
       bakeSpec,
-      pipelineConfig: hasPipelineConfig ? pipelineConfig : undefined
+      pipelineConfig: hasPipelineConfig ? pipelineConfig : undefined,
     });
     setJobId(jobId);
     setStatus("queued");
@@ -1483,6 +1684,8 @@ export function CreateModelsPanel({
   const selectedRecentJobId = recentJobs.some((job) => job.id === jobIdInput)
     ? jobIdInput
     : "";
+  const canRebuild =
+    Boolean(jobId) && status === "done" && reconSource === "local";
 
   useEffect(() => {
     if (!jobId) return;
@@ -1552,13 +1755,21 @@ export function CreateModelsPanel({
       const kind = event.kind || "event";
       const stage = event.stage || "pipeline";
       const message = event.message;
-      const progressValue = typeof event.progress === "number" ? event.progress : undefined;
+      const progressValue =
+        typeof event.progress === "number" ? event.progress : undefined;
       const artifactName = event.artifact?.name;
 
       setEventLog((prev) => {
         const next = [
-          { id: sort, kind, stage, message, progress: progressValue, artifactName },
-          ...prev
+          {
+            id: sort,
+            kind,
+            stage,
+            message,
+            progress: progressValue,
+            artifactName,
+          },
+          ...prev,
         ];
         return next.slice(0, 12);
       });
@@ -1567,7 +1778,10 @@ export function CreateModelsPanel({
         setStageProgress((prev) => ({ ...prev, [stage]: progressValue }));
         if (stage === "overall") {
           setProgress(progressValue);
-          if (statusRef.current === "queued" || statusRef.current === "loading") {
+          if (
+            statusRef.current === "queued" ||
+            statusRef.current === "loading"
+          ) {
             setStatus("running");
           }
         }
@@ -1606,7 +1820,8 @@ export function CreateModelsPanel({
         }
       };
       eventSource.addEventListener("job", (evt) => {
-        const data = typeof evt.data === "string" ? safeParseJson(evt.data) : null;
+        const data =
+          typeof evt.data === "string" ? safeParseJson(evt.data) : null;
         if (data) {
           handleStreamEvent(data as JobEventPayload);
         }
@@ -1624,6 +1839,50 @@ export function CreateModelsPanel({
     };
   }, [jobId, refreshArtifacts, renderMode, scheduleArtifactRefresh]);
 
+  const rebuildRecon = useCallback(async () => {
+    if (!jobId || !canRebuild || rebuildRunning) return;
+    setRebuildRunning(true);
+    setRebuildError(null);
+    try {
+      const payload = {
+        pipelineConfig: {
+          recon_method: reconMethod,
+          recon_images: viewsCount,
+          recon_target_tris: 2000,
+          points_enabled: pointsEnabled,
+        },
+      };
+      const res = await fetch(`${API_BASE_URL}/v1/jobs/${jobId}/recon`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        throw new Error(detail || `Rebuild failed: ${res.status}`);
+      }
+      artifactsLoadedRef.current.points = false;
+      pointsLoadedRef.current = null;
+      setPointsUrl(null);
+      await refreshArtifacts();
+      const url = client.getResultUrl(jobId);
+      await viewerRef.current?.load(url, { renderMode });
+    } catch (err: any) {
+      setRebuildError(String(err?.message || err));
+    } finally {
+      setRebuildRunning(false);
+    }
+  }, [
+    jobId,
+    canRebuild,
+    rebuildRunning,
+    reconMethod,
+    viewsCount,
+    pointsEnabled,
+    refreshArtifacts,
+    renderMode,
+  ]);
+
   return (
     <div className="hudPanelStack">
       <Panel className="hudPanel">
@@ -1636,7 +1895,9 @@ export function CreateModelsPanel({
             onChange={(e) => onModelFileChange(e.target.files?.[0] || null)}
           />
         </Label>
-        <Status>{modelFile ? `Selected: ${modelFile.name}` : "No image selected"}</Status>
+        <Status>
+          {modelFile ? `Selected: ${modelFile.name}` : "No image selected"}
+        </Status>
 
         <Group>
           <GroupTitle>Load existing job</GroupTitle>
@@ -1648,7 +1909,9 @@ export function CreateModelsPanel({
               disabled={recentJobs.length === 0}
             >
               <option value="">
-                {recentJobs.length === 0 ? "No completed jobs yet" : "Select a job"}
+                {recentJobs.length === 0
+                  ? "No completed jobs yet"
+                  : "Select a job"}
               </option>
               {recentJobs.map((job) => (
                 <option key={job.id} value={job.id}>
@@ -1670,7 +1933,11 @@ export function CreateModelsPanel({
             <Button onClick={loadJob} disabled={!jobIdInput.trim()}>
               Load job
             </Button>
-            <Button onClick={loadRecentJobs} disabled={jobsLoading} variant="ghost">
+            <Button
+              onClick={loadRecentJobs}
+              disabled={jobsLoading}
+              variant="ghost"
+            >
               {jobsLoading ? "Refreshing..." : "Refresh list"}
             </Button>
           </div>
@@ -1689,7 +1956,11 @@ export function CreateModelsPanel({
                     {cutoutSource === "local" ? "Catalog model" : "API model"}
                   </div>
                 </div>
-                <div className="hudSourceToggle" role="radiogroup" aria-label="Cutout source">
+                <div
+                  className="hudSourceToggle"
+                  role="radiogroup"
+                  aria-label="Cutout source"
+                >
                   <button
                     type="button"
                     className="hudSourceButton"
@@ -1725,11 +1996,17 @@ export function CreateModelsPanel({
                     if (cutoutSource === "local") {
                       setCutoutModel(e.target.value);
                     } else {
-                      applyApiSelection(e.target.value, setCutoutProvider, setCutoutApiModel);
+                      applyApiSelection(
+                        e.target.value,
+                        setCutoutProvider,
+                        setCutoutApiModel
+                      );
                     }
                   }}
                   disabled={
-                    cutoutSource === "local" ? cutoutOptions.length === 0 : cutoutApiModelGroups.length === 0
+                    cutoutSource === "local"
+                      ? cutoutOptions.length === 0
+                      : cutoutApiModelGroups.length === 0
                   }
                 >
                   {cutoutSource === "local" ? (
@@ -1753,7 +2030,9 @@ export function CreateModelsPanel({
                             value={buildApiKey(group.provider, model.id)}
                             disabled={
                               !isModelAvailable(model) ||
-                              !availableImageProviderOptions.includes(group.provider)
+                              !availableImageProviderOptions.includes(
+                                group.provider
+                              )
                             }
                           >
                             {getApiModelLabel(model)}
@@ -1764,9 +2043,9 @@ export function CreateModelsPanel({
                   )}
                 </Select>
               </Label>
-              {cutoutSource === "api" && !isCutoutProviderAvailable && cutoutProviderHint && (
-                <Hint>{cutoutProviderHint}</Hint>
-              )}
+              {cutoutSource === "api" &&
+                !isCutoutProviderAvailable &&
+                cutoutProviderHint && <Hint>{cutoutProviderHint}</Hint>}
               <Label>
                 Custom API model id
                 <Input
@@ -1817,7 +2096,11 @@ export function CreateModelsPanel({
                     {viewsSource === "local" ? "Catalog model" : "API model"}
                   </div>
                 </div>
-                <div className="hudSourceToggle" role="radiogroup" aria-label="View source">
+                <div
+                  className="hudSourceToggle"
+                  role="radiogroup"
+                  aria-label="View source"
+                >
                   <button
                     type="button"
                     className="hudSourceButton"
@@ -1842,16 +2125,26 @@ export function CreateModelsPanel({
               <Label>
                 Model
                 <Select
-                  value={viewsSource === "local" ? viewsModelValue : viewsApiSelection}
+                  value={
+                    viewsSource === "local"
+                      ? viewsModelValue
+                      : viewsApiSelection
+                  }
                   onChange={(e) => {
                     if (viewsSource === "local") {
                       setViewsModel(e.target.value);
                     } else {
-                      applyApiSelection(e.target.value, setViewsProvider, setViewsApiModel);
+                      applyApiSelection(
+                        e.target.value,
+                        setViewsProvider,
+                        setViewsApiModel
+                      );
                     }
                   }}
                   disabled={
-                    viewsSource === "local" ? viewsOptions.length === 0 : viewsApiModelGroups.length === 0
+                    viewsSource === "local"
+                      ? viewsOptions.length === 0
+                      : viewsApiModelGroups.length === 0
                   }
                 >
                   {viewsSource === "local" ? (
@@ -1875,7 +2168,9 @@ export function CreateModelsPanel({
                             value={buildApiKey(group.provider, model.id)}
                             disabled={
                               !isModelAvailable(model) ||
-                              !availableImageProviderOptions.includes(group.provider)
+                              !availableImageProviderOptions.includes(
+                                group.provider
+                              )
                             }
                           >
                             {getApiModelLabel(model)}
@@ -1886,9 +2181,9 @@ export function CreateModelsPanel({
                   )}
                 </Select>
               </Label>
-              {viewsSource === "api" && !isViewsProviderAvailable && viewsProviderHint && (
-                <Hint>{viewsProviderHint}</Hint>
-              )}
+              {viewsSource === "api" &&
+                !isViewsProviderAvailable &&
+                viewsProviderHint && <Hint>{viewsProviderHint}</Hint>}
               <Label>
                 Custom API model id
                 <Input
@@ -1921,16 +2216,20 @@ export function CreateModelsPanel({
                   placeholder='{"__hf_api_name": "/predict", "__hf_inputs": ["{image}", "{prompt}", "{az_deg}", "{elev_deg}"]}'
                 />
               </Label>
-              <Label className="hudSlider">
-                View count: {viewsCount}
-                <Range
-                  min={4}
-                  max={12}
-                  step={1}
-                  value={viewsCount}
-                  onChange={(e) => setViewsCount(Number(e.target.value))}
-                />
-              </Label>
+              {isZero123ppViews ? (
+                <Label className="hudSlider">View count: 6</Label>
+              ) : (
+                <Label className="hudSlider">
+                  View count: {viewsCount}
+                  <Range
+                    min={4}
+                    max={12}
+                    step={1}
+                    value={viewsCount}
+                    onChange={(e) => setViewsCount(Number(e.target.value))}
+                  />
+                </Label>
+              )}
             </div>
 
             <div className="hudPipelineStage">
@@ -1941,7 +2240,11 @@ export function CreateModelsPanel({
                     {depthSource === "local" ? "Catalog model" : "API model"}
                   </div>
                 </div>
-                <div className="hudSourceToggle" role="radiogroup" aria-label="Depth source">
+                <div
+                  className="hudSourceToggle"
+                  role="radiogroup"
+                  aria-label="Depth source"
+                >
                   <button
                     type="button"
                     className="hudSourceButton"
@@ -1977,11 +2280,17 @@ export function CreateModelsPanel({
                     if (depthSource === "local") {
                       setDepthModel(e.target.value);
                     } else {
-                      applyApiSelection(e.target.value, setDepthProvider, setDepthApiModel);
+                      applyApiSelection(
+                        e.target.value,
+                        setDepthProvider,
+                        setDepthApiModel
+                      );
                     }
                   }}
                   disabled={
-                    depthSource === "local" ? depthOptions.length === 0 : depthApiModelGroups.length === 0
+                    depthSource === "local"
+                      ? depthOptions.length === 0
+                      : depthApiModelGroups.length === 0
                   }
                 >
                   {depthSource === "local" ? (
@@ -2005,7 +2314,9 @@ export function CreateModelsPanel({
                             value={buildApiKey(group.provider, model.id)}
                             disabled={
                               !isModelAvailable(model) ||
-                              !availableImageProviderOptions.includes(group.provider)
+                              !availableImageProviderOptions.includes(
+                                group.provider
+                              )
                             }
                           >
                             {getApiModelLabel(model)}
@@ -2016,9 +2327,9 @@ export function CreateModelsPanel({
                   )}
                 </Select>
               </Label>
-              {depthSource === "api" && !isDepthProviderAvailable && depthProviderHint && (
-                <Hint>{depthProviderHint}</Hint>
-              )}
+              {depthSource === "api" &&
+                !isDepthProviderAvailable &&
+                depthProviderHint && <Hint>{depthProviderHint}</Hint>}
               <Label>
                 Custom API model id
                 <Input
@@ -2071,7 +2382,9 @@ export function CreateModelsPanel({
                 Invert depth (Depth Anything)
               </Label>
               {depthSource === "local" && (
-                <Hint>Use when the model outputs inverse depth (near = larger).</Hint>
+                <Hint>
+                  Use when the model outputs inverse depth (near = larger).
+                </Hint>
               )}
             </div>
 
@@ -2080,10 +2393,16 @@ export function CreateModelsPanel({
                 <div>
                   <div className="hudPipelineTitle">Mesh</div>
                   <div className="hudPipelineMeta">
-                    {reconSource === "local" ? "Local reconstruction" : "API model"}
+                    {reconSource === "local"
+                      ? "Local reconstruction"
+                      : "API model"}
                   </div>
                 </div>
-                <div className="hudSourceToggle" role="radiogroup" aria-label="Mesh source">
+                <div
+                  className="hudSourceToggle"
+                  role="radiogroup"
+                  aria-label="Mesh source"
+                >
                   <button
                     type="button"
                     className="hudSourceButton"
@@ -2108,15 +2427,23 @@ export function CreateModelsPanel({
               <Label>
                 Model
                 <Select
-                  value={reconSource === "local" ? reconMethod : reconApiSelection}
+                  value={
+                    reconSource === "local" ? reconMethod : reconApiSelection
+                  }
                   onChange={(e) => {
                     if (reconSource === "local") {
                       setReconMethod(e.target.value);
                     } else {
-                      applyApiSelection(e.target.value, setReconProvider, setReconApiModel);
+                      applyApiSelection(
+                        e.target.value,
+                        setReconProvider,
+                        setReconApiModel
+                      );
                     }
                   }}
-                  disabled={reconSource === "api" && reconApiModelGroups.length === 0}
+                  disabled={
+                    reconSource === "api" && reconApiModelGroups.length === 0
+                  }
                 >
                   {reconSource === "local" ? (
                     <>
@@ -2134,7 +2461,9 @@ export function CreateModelsPanel({
                             value={buildApiKey(group.provider, model.id)}
                             disabled={
                               !isModelAvailable(model) ||
-                              !availableReconProviderOptions.includes(group.provider)
+                              !availableReconProviderOptions.includes(
+                                group.provider
+                              )
                             }
                           >
                             {getApiModelLabel(model)}
@@ -2145,13 +2474,13 @@ export function CreateModelsPanel({
                   )}
                 </Select>
               </Label>
-              {reconSource === "api" && !isReconProviderAvailable && reconProviderHint && (
-                <Hint>{reconProviderHint}</Hint>
-              )}
+              {reconSource === "api" &&
+                !isReconProviderAvailable &&
+                reconProviderHint && <Hint>{reconProviderHint}</Hint>}
               <Label>
                 Custom API model id
                 <Input
-                  placeholder="multi-image-to-3d"
+                  placeholder="provider/model-id"
                   value={reconApiModelOverride}
                   onChange={(e) => setReconApiModelOverride(e.target.value)}
                   disabled={reconSource !== "api"}
@@ -2198,11 +2527,15 @@ export function CreateModelsPanel({
             !modelsError &&
             cutoutOptions.length === 0 &&
             depthOptions.length === 0 && (
-              <Hint>No local pipeline models available from ai-kit catalog.</Hint>
+              <Hint>
+                No local pipeline models available from ai-kit catalog.
+              </Hint>
             )}
-          {modelsLoaded && !modelsError && availableImageProviderOptions.length === 0 && (
-            <Hint>No API image models available from ai-kit providers.</Hint>
-          )}
+          {modelsLoaded &&
+            !modelsError &&
+            availableImageProviderOptions.length === 0 && (
+              <Hint>No API image models available from ai-kit providers.</Hint>
+            )}
         </Group>
 
         <Group>
@@ -2215,6 +2548,23 @@ export function CreateModelsPanel({
             Export point cloud (PLY)
           </Label>
           <Hint>Generates `points.ply` for hologram/point renders.</Hint>
+          <div className="hudControlRow">
+            <Button
+              onClick={rebuildRecon}
+              disabled={!canRebuild || rebuildRunning}
+              title={
+                canRebuild
+                  ? undefined
+                  : "Load a completed local job to rebuild the mesh."
+              }
+            >
+              {rebuildRunning ? "Rebuilding..." : "Rebuild mesh"}
+            </Button>
+          </div>
+          <Hint>
+            Rebuilds mesh from existing views + depth (local mode only).
+          </Hint>
+          {rebuildError && <pre className="ui-error">{rebuildError}</pre>}
         </Group>
 
         <Group>
@@ -2230,7 +2580,13 @@ export function CreateModelsPanel({
             Model
             <Select
               value={captionSelection}
-              onChange={(e) => applyApiSelection(e.target.value, setCaptionProvider, setCaptionModel)}
+              onChange={(e) =>
+                applyApiSelection(
+                  e.target.value,
+                  setCaptionProvider,
+                  setCaptionModel
+                )
+              }
               disabled={!captionEnabled || availableVisionModels.length === 0}
             >
               {apiModelGroups.length === 0 ? (
@@ -2244,7 +2600,9 @@ export function CreateModelsPanel({
                         value={buildApiKey(group.provider, model.id)}
                         disabled={
                           !isModelAvailable(model) ||
-                          !availableVisionProviderOptions.includes(group.provider)
+                          !availableVisionProviderOptions.includes(
+                            group.provider
+                          )
                         }
                       >
                         {getApiModelLabel(model)}
@@ -2255,9 +2613,9 @@ export function CreateModelsPanel({
               )}
             </Select>
           </Label>
-          {captionEnabled && !isCaptionProviderAvailable && captionProviderHint && (
-            <Hint>{captionProviderHint}</Hint>
-          )}
+          {captionEnabled &&
+            !isCaptionProviderAvailable &&
+            captionProviderHint && <Hint>{captionProviderHint}</Hint>}
           <Label>
             Prompt
             <Textarea
@@ -2275,7 +2633,12 @@ export function CreateModelsPanel({
 
         <div className="hudActions">
           <Button
-            disabled={!modelFile || Boolean(apiSelectionError) || !modelsLoaded || Boolean(modelsError)}
+            disabled={
+              !modelFile ||
+              Boolean(apiSelectionError) ||
+              !modelsLoaded ||
+              Boolean(modelsError)
+            }
             onClick={startBake}
             title={
               apiSelectionError ||
@@ -2285,59 +2648,91 @@ export function CreateModelsPanel({
           >
             Start bake
           </Button>
-          <Badge className="hudBadge">API {client.getResultUrl("<job>").split("/v1/")[0]}</Badge>
+          <Badge className="hudBadge">
+            API {client.getResultUrl("<job>").split("/v1/")[0]}
+          </Badge>
         </div>
         {apiSelectionError && <Hint>{apiSelectionError}</Hint>}
 
-        <Status className="hudStatus">
-          <div>
-            <strong>Status:</strong> {status}
+        <div className="hudProgressContainer">
+          <div className="hudProgressHeader">
+            <span className="hudProgressStatus" data-status={status}>
+              {status === "idle" && "Ready to forge"}
+              {status === "uploading" && "Uploading image..."}
+              {status === "queued" && "Queued for processing..."}
+              {status === "loading" && "Loading job..."}
+              {status === "running" &&
+                (eventLog[0]?.stage
+                  ? `${eventLog[0].stage.replace(/_/g, " ")}...`
+                  : "Processing...")}
+              {status === "done" && "Complete"}
+              {status === "error" && "Error occurred"}
+            </span>
+            <span className="hudProgressPercent">
+              {(progress * 100).toFixed(0)}%
+            </span>
           </div>
-          <div>
-            <strong>Progress:</strong> {(progress * 100).toFixed(0)}%
+
+          <div className="hudProgressBarOuter">
+            <div
+              className="hudProgressBarInner"
+              style={{ "--progress": progress } as React.CSSProperties}
+              data-status={status}
+            />
+            <div
+              className="hudProgressBarGlow"
+              style={{ "--progress": progress } as React.CSSProperties}
+            />
+            <div className="hudProgressBarScanlines" />
           </div>
-          <div>
-            <strong>Events:</strong> {eventStreamState}
-          </div>
-          {jobId && (
-            <div>
-              <strong>Job:</strong> {jobId}
-            </div>
-          )}
-          {stageProgressItems.length > 0 && (
-            <div className="hudEventStages">
-              {stageProgressItems.map((item) => (
-                <div className="hudEventStage" key={item.stage}>
-                  <span>{item.stage.replace("_", " ")}</span>
-                  <span>{Math.round((item.progress ?? 0) * 100)}%</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {eventLog.length > 0 && (
-            <div className="hudEventLog">
-              {eventLog.map((entry) => (
-                <div className="hudEventRow" key={entry.id}>
-                  <span className={`hudEventKind hudEventKind-${entry.kind}`}>
-                    {entry.kind}
-                  </span>
-                  <span className="hudEventStageLabel">{entry.stage}</span>
-                  {typeof entry.progress === "number" && (
-                    <span className="hudEventProgress">
-                      {Math.round(entry.progress * 100)}%
+
+          <div className="hudProgressStages">
+            {["normalize", "remove_bg", "multiview", "depth", "recon"].map(
+              (stage, idx) => {
+                const stageData = stageProgressItems.find(
+                  (s) => s.stage === stage
+                );
+                const isActive = eventLog[0]?.stage === stage;
+                const isComplete = (stageData?.progress ?? 0) >= 1;
+                const hasStarted = stageData !== undefined;
+                return (
+                  <div
+                    key={stage}
+                    className="hudProgressStage"
+                    data-active={isActive}
+                    data-complete={isComplete}
+                    data-started={hasStarted}
+                  >
+                    <div className="hudProgressStageDot">
+                      {isComplete ? (
+                        <svg viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                        </svg>
+                      ) : (
+                        <span>{idx + 1}</span>
+                      )}
+                    </div>
+                    <span className="hudProgressStageLabel">
+                      {stage.replace(/_/g, " ")}
                     </span>
-                  )}
-                  {entry.artifactName && (
-                    <span className="hudEventArtifact">{entry.artifactName}</span>
-                  )}
-                  {entry.message && <span className="hudEventMessage">{entry.message}</span>}
-                </div>
-              ))}
+                  </div>
+                );
+              }
+            )}
+          </div>
+
+          {jobId && (
+            <div className="hudProgressJobId">
+              <span>Job:</span>
+              <code>{jobId.slice(0, 12)}...</code>
             </div>
           )}
-          {apiSelectionError && <div className="ui-warning">{apiSelectionError}</div>}
+
           {error && <pre className="ui-error">{error}</pre>}
-        </Status>
+          {apiSelectionError && (
+            <div className="ui-warning">{apiSelectionError}</div>
+          )}
+        </div>
       </Panel>
 
       <Panel className="hudPanel">
@@ -2349,7 +2744,10 @@ export function CreateModelsPanel({
         </Status>
         <Label>
           Render mode
-          <Select value={renderMode} onChange={(e) => setRenderMode(e.target.value as RenderMode)}>
+          <Select
+            value={renderMode}
+            onChange={(e) => setRenderMode(e.target.value as RenderMode)}
+          >
             <option value="mesh">Mesh</option>
             <option value="points">Points</option>
             <option value="hologram">Hologram</option>

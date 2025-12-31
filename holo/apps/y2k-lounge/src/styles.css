@@ -1125,6 +1125,281 @@ body[data-theme="light"] .hudArtifactPlaceholder {
   background: linear-gradient(90deg, var(--lounge-accent), rgba(130, 150, 170, 0.6));
 }
 
+/* Progress Bar Component */
+.hudProgressContainer {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hudProgressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hudProgressStatus {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--lounge-ink);
+  text-transform: capitalize;
+  animation: hudStatusPulse 2s ease-in-out infinite;
+}
+
+.hudProgressStatus[data-status="idle"] {
+  color: var(--lounge-sidebar-muted);
+  animation: none;
+}
+
+.hudProgressStatus[data-status="done"] {
+  color: var(--lounge-accent);
+  animation: hudStatusGlow 1.5s ease-in-out infinite;
+}
+
+.hudProgressStatus[data-status="error"] {
+  color: #ff6b6b;
+  animation: none;
+}
+
+.hudProgressPercent {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--lounge-accent);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+  text-align: right;
+}
+
+.hudProgressBarOuter {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(40, 60, 80, 0.5);
+  border: 1px solid var(--lounge-hud-border);
+  overflow: hidden;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+body[data-theme="light"] .hudProgressBarOuter {
+  background: rgba(180, 200, 220, 0.4);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.hudProgressBarInner {
+  position: absolute;
+  inset: 0;
+  width: calc(var(--progress, 0) * 100%);
+  background: linear-gradient(
+    90deg,
+    var(--lounge-accent) 0%,
+    rgba(71, 247, 212, 0.85) 50%,
+    var(--lounge-accent-strong) 100%
+  );
+  border-radius: 999px;
+  transition: width 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+  box-shadow: 0 0 12px rgba(71, 247, 212, 0.5);
+}
+
+.hudProgressBarInner[data-status="idle"] {
+  background: rgba(120, 160, 200, 0.4);
+  box-shadow: none;
+}
+
+.hudProgressBarInner[data-status="done"] {
+  background: linear-gradient(
+    90deg,
+    var(--lounge-accent) 0%,
+    var(--lounge-accent-strong) 50%,
+    var(--lounge-accent) 100%
+  );
+  animation: hudBarShimmer 2s linear infinite;
+  background-size: 200% 100%;
+}
+
+.hudProgressBarInner[data-status="error"] {
+  background: linear-gradient(90deg, #ff6b6b 0%, #ff8888 50%, #ff6b6b 100%);
+  box-shadow: 0 0 12px rgba(255, 107, 107, 0.5);
+}
+
+.hudProgressBarGlow {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  left: 0;
+  width: calc(var(--progress, 0) * 100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(71, 247, 212, 0.3) 80%,
+    rgba(71, 247, 212, 0.6) 100%
+  );
+  filter: blur(6px);
+  pointer-events: none;
+  transition: width 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.hudProgressBarScanlines {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.08) 0 1px,
+    transparent 1px 3px
+  );
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+body[data-theme="light"] .hudProgressBarScanlines {
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.06) 0 1px,
+    transparent 1px 3px
+  );
+}
+
+.hudProgressStages {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.hudProgressStage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.hudProgressStageDot {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid var(--lounge-hud-border);
+  background: rgba(20, 30, 44, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--lounge-sidebar-muted);
+  transition: all 0.3s ease;
+}
+
+body[data-theme="light"] .hudProgressStageDot {
+  background: rgba(230, 235, 242, 0.9);
+}
+
+.hudProgressStageDot svg {
+  width: 12px;
+  height: 12px;
+}
+
+.hudProgressStage[data-started="true"] .hudProgressStageDot {
+  border-color: rgba(71, 247, 212, 0.5);
+  color: var(--lounge-ink);
+}
+
+.hudProgressStage[data-active="true"] .hudProgressStageDot {
+  border-color: var(--lounge-accent);
+  background: rgba(71, 247, 212, 0.15);
+  color: var(--lounge-accent);
+  box-shadow: 0 0 12px rgba(71, 247, 212, 0.4);
+  animation: hudDotPulse 1.5s ease-in-out infinite;
+}
+
+.hudProgressStage[data-complete="true"] .hudProgressStageDot {
+  border-color: var(--lounge-accent);
+  background: var(--lounge-accent);
+  color: #05070c;
+  box-shadow: 0 0 8px rgba(71, 247, 212, 0.5);
+  animation: none;
+}
+
+.hudProgressStageLabel {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lounge-sidebar-muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  transition: color 0.3s ease;
+}
+
+.hudProgressStage[data-active="true"] .hudProgressStageLabel {
+  color: var(--lounge-accent);
+}
+
+.hudProgressStage[data-complete="true"] .hudProgressStageLabel {
+  color: var(--lounge-ink);
+}
+
+.hudProgressJobId {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--lounge-sidebar-muted);
+  padding-top: 4px;
+  border-top: 1px solid var(--lounge-hud-border);
+}
+
+.hudProgressJobId code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  color: var(--lounge-ink);
+  opacity: 0.7;
+}
+
+@keyframes hudStatusPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes hudStatusGlow {
+  0%, 100% {
+    text-shadow: 0 0 8px rgba(71, 247, 212, 0.6);
+  }
+  50% {
+    text-shadow: 0 0 16px rgba(71, 247, 212, 0.9), 0 0 24px rgba(71, 247, 212, 0.4);
+  }
+}
+
+@keyframes hudDotPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 12px rgba(71, 247, 212, 0.4);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 18px rgba(71, 247, 212, 0.6);
+  }
+}
+
+@keyframes hudBarShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
 @keyframes loungeDrop {
   from {
     opacity: 0;
