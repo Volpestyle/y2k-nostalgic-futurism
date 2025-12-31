@@ -5,25 +5,26 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from ai_kit.catalog import load_catalog_models
 from ai_kit.pricing import load_scraped_models
 from ai_kit.types import ModelCapabilities, ModelMetadata, TokenPrices
 
 from ..aws.s3 import presign_s3_url
-from ..config import AwsConfig
+from ..config import AwsConfig, PipelineConfig
 from ..jobs.local import LocalJobRunner, LocalJobStore
 from ..jobs.runner_sqs import SqsJobRunner
 from ..jobs.store_dynamodb import JobStoreDynamoDB
+from ..local_recon import LocalReconstructor
 
 app = FastAPI(title="img2mesh3d", version="0.2.0")
 logger = logging.getLogger("img2mesh3d.api")
@@ -120,6 +121,8 @@ def _bake_spec_to_overrides(spec: Dict[str, Any]) -> Dict[str, Any]:
     cutout = spec.get("cutout") or {}
     depth = spec.get("depth") or {}
     views = spec.get("views") or {}
+    recon = spec.get("recon") or {}
+    mesh = spec.get("mesh") or {}
     if isinstance(cutout, dict) and cutout.get("model"):
         overrides["remove_bg_model"] = str(_alias("cutout", str(cutout["model"])))
     if isinstance(cutout, dict) and isinstance(cutout.get("parameters"), dict):
@@ -128,13 +131,32 @@ def _bake_spec_to_overrides(spec: Dict[str, Any]) -> Dict[str, Any]:
         overrides["depth_model"] = str(_alias("depth", str(depth["model"])))
     if isinstance(depth, dict) and isinstance(depth.get("parameters"), dict):
         overrides["depth_params"] = depth["parameters"]
+    if isinstance(depth, dict) and depth.get("depthInvert") is not None:
+        overrides["depth_invert"] = bool(depth.get("depthInvert"))
     if isinstance(views, dict) and views.get("model"):
         overrides["multiview_model"] = str(_alias("views", str(views["model"])))
     if isinstance(views, dict) and isinstance(views.get("parameters"), dict):
         overrides["multiview_params"] = views["parameters"]
     if isinstance(views, dict) and isinstance(views.get("count"), (int, float)):
         count = int(views["count"])
-        overrides["meshy_images"] = max(1, min(4, count))
+        overrides["recon_images"] = max(1, count)
+    if isinstance(views, dict) and isinstance(views.get("fovDeg"), (int, float)):
+        overrides["camera_fov_deg"] = float(views["fovDeg"])
+    if isinstance(views, dict) and isinstance(views.get("elevDeg"), (int, float)):
+        overrides["views_elev_deg"] = float(views["elevDeg"])
+    if isinstance(recon, dict) and recon.get("method"):
+        overrides["recon_method"] = str(recon["method"])
+    if isinstance(recon, dict) and isinstance(recon.get("voxelSize"), (int, float)):
+        overrides["recon_voxel_size"] = float(recon["voxelSize"])
+    points = recon.get("points") if isinstance(recon, dict) else None
+    if isinstance(points, dict) and points.get("enabled") is not None:
+        overrides["points_enabled"] = bool(points.get("enabled"))
+    if isinstance(points, dict) and isinstance(points.get("voxelSize"), (int, float)):
+        overrides["points_voxel_size"] = float(points["voxelSize"])
+    if isinstance(points, dict) and isinstance(points.get("maxPoints"), (int, float)):
+        overrides["points_max_points"] = int(points["maxPoints"])
+    if isinstance(mesh, dict) and isinstance(mesh.get("targetTris"), (int, float)):
+        overrides["recon_target_tris"] = int(mesh["targetTris"])
     return overrides
 
 
@@ -198,6 +220,136 @@ def _build_depth_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
     return {"version": 1, "format": "png", "views": views}
 
 
+def _disk_job_status(job_id: str, job_dir: Path) -> Optional[Dict[str, Any]]:
+    glb_path = job_dir / "recon" / "model.glb"
+    if not glb_path.exists():
+        return None
+    manifest_path = job_dir / "manifest.json"
+    updated_at_ms = int(glb_path.stat().st_mtime * 1000)
+    created_at_ms = int(
+        (manifest_path.stat().st_mtime if manifest_path.exists() else job_dir.stat().st_mtime) * 1000
+    )
+    return {
+        "job_id": job_id,
+        "state": "SUCCEEDED",
+        "stage": "done",
+        "progress": 1.0,
+        "created_at_ms": created_at_ms,
+        "updated_at_ms": updated_at_ms,
+        "error": None,
+        "input": {"bucket": None, "key": None},
+        "output": {
+            "glb": {"bucket": None, "key": None},
+            "manifest": {"bucket": None, "key": None},
+        },
+    }
+
+
+def _list_disk_jobs() -> Sequence[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    if not LOCAL_BASE_DIR.exists():
+        return items
+    for entry in LOCAL_BASE_DIR.iterdir():
+        if not entry.is_dir():
+            continue
+        job = _disk_job_status(entry.name, entry)
+        if job:
+            items.append(job)
+    items.sort(key=lambda item: int(item.get("updated_at_ms", 0)), reverse=True)
+    return items
+
+
+_RECON_OVERRIDE_KEYS = {
+    "recon_method",
+    "recon_fusion",
+    "recon_voxel_size",
+    "recon_alpha",
+    "recon_poisson_depth",
+    "recon_target_tris",
+    "recon_images",
+    "recon_view_indices",
+    "points_enabled",
+    "points_voxel_size",
+    "points_max_points",
+    "texture_enabled",
+    "texture_size",
+    "texture_backend",
+    "blender_path",
+    "blender_bake_samples",
+    "blender_bake_margin",
+    "camera_fov_deg",
+    "camera_radius",
+    "views_elev_deg",
+    "views_azimuths_deg",
+    "views_elevations_deg",
+    "depth_invert",
+    "depth_near",
+    "depth_far",
+}
+
+
+def _filter_recon_overrides(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k in _RECON_OVERRIDE_KEYS}
+
+
+def _resolve_local_view_paths(job_id: str, manifest: Dict[str, Any]) -> List[Path]:
+    steps = manifest.get("steps") or {}
+    mv = steps.get("multiview") or {}
+    views = mv.get("views") or []
+    if not isinstance(views, list) or not views:
+        raise HTTPException(status_code=400, detail="No multiview artifacts found for job")
+    resolved: List[Path] = []
+    for rel in views:
+        if not isinstance(rel, str):
+            continue
+        path = (LOCAL_BASE_DIR / job_id / rel).resolve()
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"Missing view artifact: {rel}")
+        resolved.append(path)
+    if not resolved:
+        raise HTTPException(status_code=400, detail="No valid view artifacts found for job")
+    return resolved
+
+
+def _resolve_local_depth_paths(job_id: str, manifest: Dict[str, Any]) -> Dict[int, Path]:
+    steps = manifest.get("steps") or {}
+    depth = steps.get("depth") or {}
+    maps = depth.get("maps") or []
+    if not isinstance(maps, list) or not maps:
+        raise HTTPException(status_code=400, detail="No depth artifacts found for job")
+    by_index: Dict[int, Dict[str, Path]] = {}
+    for item in maps:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("index", 0))
+        except (TypeError, ValueError):
+            continue
+        kind = str(item.get("kind", ""))
+        rel = str(item.get("path", ""))
+        if not rel:
+            continue
+        path = (LOCAL_BASE_DIR / job_id / rel).resolve()
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"Missing depth artifact: {rel}")
+        by_index.setdefault(idx, {})[kind] = path
+    if not by_index:
+        raise HTTPException(status_code=400, detail="No depth artifacts found for job")
+    resolved: Dict[int, Path] = {}
+    for idx, entries in by_index.items():
+        if "grey_depth" in entries:
+            resolved[idx] = entries["grey_depth"]
+        elif "gray_depth" in entries:
+            resolved[idx] = entries["gray_depth"]
+        elif "color_depth" in entries:
+            resolved[idx] = entries["color_depth"]
+        else:
+            resolved[idx] = next(iter(entries.values()))
+    return resolved
+
+
 def _model_available(provider: str) -> bool:
     key_env = {
         "openai": ("AI_KIT_OPENAI_API_KEY", "OPENAI_API_KEY"),
@@ -206,7 +358,6 @@ def _model_available(provider: str) -> bool:
         "xai": ("AI_KIT_XAI_API_KEY", "XAI_API_KEY"),
         "replicate": ("AI_KIT_REPLICATE_API_KEY", "REPLICATE_API_TOKEN"),
         "fal": ("AI_KIT_FAL_API_KEY", "FAL_API_KEY", "FAL_KEY"),
-        "meshy": ("AI_KIT_MESHY_API_KEY", "MESHY_API_KEY"),
     }
     env_keys = key_env.get(provider)
     if not env_keys:
@@ -256,15 +407,48 @@ def _load_scraped_model_metadata() -> list[ModelMetadata]:
     return output
 
 
+def _ensure_catalog_cutout(models: list[ModelMetadata]) -> list[ModelMetadata]:
+    updated: list[ModelMetadata] = []
+    cutout_found = False
+    for model in models:
+        if isinstance(model, ModelMetadata):
+            if model.provider == "catalog" and model.id in {"bria/remove-background", "rmbg-1.4"}:
+                if model.family != "cutout":
+                    model = replace(model, family="cutout")
+            if model.provider == "catalog" and model.family == "cutout":
+                cutout_found = True
+        updated.append(model)
+    if not cutout_found:
+        updated.append(
+            ModelMetadata(
+                id="bria/remove-background",
+                displayName="BRIA Remove Background",
+                provider="catalog",
+                family="cutout",
+                capabilities=ModelCapabilities(
+                    text=False,
+                    vision=True,
+                    image=True,
+                    tool_use=False,
+                    structured_output=False,
+                    reasoning=False,
+                ),
+            )
+        )
+    return updated
+
+
 @app.get("/v1/ai/provider-models")
 def list_provider_models(providers: Optional[str] = None) -> list[Dict[str, Any]]:
-    models = load_catalog_models() + _load_scraped_model_metadata()
+    models = _ensure_catalog_cutout(load_catalog_models()) + _load_scraped_model_metadata()
     selected = None
     if providers:
         selected = {p.strip() for p in providers.split(",") if p.strip()}
     payload: list[Dict[str, Any]] = []
     for model in models:
         if not isinstance(model, ModelMetadata):
+            continue
+        if model.provider == "meshy":
             continue
         if selected and model.provider not in selected:
             continue
@@ -285,9 +469,10 @@ async def create_job(
     image: Optional[UploadFile] = File(None),
     bakeSpec: Optional[str] = Form(None),
     pipelineConfig: Optional[str] = Form(None),
+    recon_images: Optional[int] = Form(None),
     meshy_images: Optional[int] = Form(None),
     depth_concurrency: Optional[int] = Form(None),
-    enable_pbr: Optional[bool] = Form(None),
+    texture_enabled: Optional[bool] = Form(None),
 ) -> Dict[str, Any]:
     """
     Create an async job. Upload an image and receive a job_id immediately.
@@ -308,12 +493,14 @@ async def create_job(
     if pipeline_cfg:
         overrides.update(pipeline_cfg)
 
-    if meshy_images is not None:
-        overrides["meshy_images"] = int(meshy_images)
+    if recon_images is not None:
+        overrides["recon_images"] = int(recon_images)
+    elif meshy_images is not None:
+        overrides["recon_images"] = int(meshy_images)
     if depth_concurrency is not None:
         overrides["depth_concurrency"] = int(depth_concurrency)
-    if enable_pbr is not None:
-        overrides["enable_pbr"] = bool(enable_pbr)
+    if texture_enabled is not None:
+        overrides["texture_enabled"] = bool(texture_enabled)
 
     if _use_local_mode():
         job_id = LOCAL_RUNNER.submit_image_bytes(
@@ -348,19 +535,60 @@ async def create_job(
     return {"job_id": job_id}
 
 
+@app.get("/v1/jobs")
+def list_jobs(status: Optional[str] = None, limit: int = 25) -> List[Dict[str, Any]]:
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be >= 1")
+    limit = min(limit, 100)
+
+    if _use_local_mode():
+        want = (status or "").lower()
+        items: List[Dict[str, Any]] = []
+        if want in {"", "done"}:
+            items.extend(_list_disk_jobs())
+        if want in {"", "queued", "running", "error"}:
+            state = None
+            if want == "queued":
+                state = "QUEUED"
+            elif want == "running":
+                state = "RUNNING"
+            elif want == "error":
+                state = "FAILED"
+            if state is not None or want == "":
+                items.extend([job.to_dict() for job in LOCAL_STORE.list_jobs(state=state, limit=limit)])
+        items.sort(key=lambda item: int(item.get("updated_at_ms", 0)), reverse=True)
+        # de-dupe by job_id
+        seen = set()
+        deduped: List[Dict[str, Any]] = []
+        for item in items:
+            job_id = item.get("job_id")
+            if not job_id or job_id in seen:
+                continue
+            seen.add(job_id)
+            deduped.append(item)
+            if len(deduped) >= limit:
+                break
+        return deduped
+
+    raise HTTPException(status_code=400, detail="Job listing is only supported in local mode")
+
+
 @app.get("/v1/jobs/{job_id}")
 def get_job(job_id: str, presign: bool = True) -> Dict[str, Any]:
     if _use_local_mode():
         try:
             status = LOCAL_STORE.get_job(job_id=job_id)
+            d = status.to_dict()
         except KeyError:
-            raise HTTPException(status_code=404, detail="Job not found")
-        d = status.to_dict()
+            job_dir = LOCAL_BASE_DIR / job_id
+            d = _disk_job_status(job_id, job_dir)
+            if d is None:
+                raise HTTPException(status_code=404, detail="Job not found")
         if presign:
             out = d.get("output") or {}
             glb = out.get("glb") or {}
             man = out.get("manifest") or {}
-            glb_path = LOCAL_BASE_DIR / job_id / "meshy" / "model.glb"
+            glb_path = LOCAL_BASE_DIR / job_id / "recon" / "model.glb"
             manifest_path = LOCAL_BASE_DIR / job_id / "manifest.json"
             if glb_path.exists():
                 glb["url"] = f"/v1/jobs/{job_id}/result"
@@ -397,7 +625,7 @@ def get_job(job_id: str, presign: bool = True) -> Dict[str, Any]:
 @app.get("/v1/jobs/{job_id}/result")
 def get_result(job_id: str) -> Response:
     if _use_local_mode():
-        path = LOCAL_BASE_DIR / job_id / "meshy" / "model.glb"
+        path = LOCAL_BASE_DIR / job_id / "recon" / "model.glb"
         if not path.exists():
             raise HTTPException(status_code=404, detail="Result not ready")
         return FileResponse(path, media_type="model/gltf-binary")
@@ -414,7 +642,7 @@ def get_result(job_id: str) -> Response:
     return RedirectResponse(url=url)
 
 
-@app.get("/v1/jobs/{job_id}/artifacts/{path:path}")
+@app.api_route("/v1/jobs/{job_id}/artifacts/{path:path}", methods=["GET", "HEAD"])
 def get_artifact(job_id: str, path: str) -> Response:
     req_path = path.strip("/")
     if req_path == "views.json":
@@ -430,6 +658,10 @@ def get_artifact(job_id: str, path: str) -> Response:
         req_path = f"step2/views/{Path(req_path).name}"
     elif req_path.startswith("depth/"):
         req_path = f"step3/depth/{Path(req_path).name}"
+    elif req_path == "points.ply":
+        req_path = "recon/points.ply"
+    elif req_path == "albedo.png":
+        req_path = "recon/albedo.png"
 
     if _use_local_mode():
         local_path = (LOCAL_BASE_DIR / job_id / req_path).resolve()
@@ -441,6 +673,55 @@ def get_artifact(job_id: str, path: str) -> Response:
     key = f"{aws.s3_prefix.strip('/')}/{job_id}/{req_path}".lstrip("/")
     url = presign_s3_url(bucket=aws.s3_bucket, key=key, region=aws.region)
     return RedirectResponse(url=url)
+
+
+@app.post("/v1/jobs/{job_id}/recon")
+def rebuild_recon(job_id: str, payload: Dict[str, Any] = Body(default_factory=dict)) -> Dict[str, Any]:
+    if not _use_local_mode():
+        raise HTTPException(status_code=400, detail="Recon rebuild is only supported in local mode")
+
+    manifest = _load_manifest_local(job_id)
+    view_paths = _resolve_local_view_paths(job_id, manifest)
+    depth_paths = _resolve_local_depth_paths(job_id, manifest)
+
+    overrides: Dict[str, Any] = {}
+    bake_spec = payload.get("bakeSpec")
+    if isinstance(bake_spec, dict):
+        overrides.update(_filter_recon_overrides(_bake_spec_to_overrides(bake_spec)))
+    pipeline_cfg = payload.get("pipelineConfig")
+    overrides.update(_filter_recon_overrides(pipeline_cfg))
+
+    cfg = PipelineConfig.from_env()
+    if overrides:
+        cfg = cfg.model_copy(update=overrides)
+
+    logger.info(
+        "rebuild_recon job_id=%s views=%d depth=%d overrides=%s",
+        job_id,
+        len(view_paths),
+        len(depth_paths),
+        sorted(overrides.keys()),
+    )
+    recon = LocalReconstructor(cfg)
+    out_dir = LOCAL_BASE_DIR / job_id / "recon"
+    outputs = recon.run(view_paths=view_paths, depth_paths=depth_paths, out_dir=out_dir)
+
+    recon_step: Dict[str, str] = {}
+    if outputs.mesh_path:
+        recon_step["glb"] = "recon/model.glb"
+    if outputs.texture_path:
+        recon_step["albedo"] = "recon/albedo.png"
+    if outputs.point_cloud_path:
+        recon_step["points"] = "recon/points.ply"
+
+    manifest.setdefault("steps", {})["recon"] = recon_step
+    (LOCAL_BASE_DIR / job_id / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    logger.info("rebuild_recon done job_id=%s artifacts=%s", job_id, sorted(recon_step.keys()))
+    return {"job_id": job_id, "recon": recon_step}
 
 
 @app.get("/v1/jobs/{job_id}/events")
