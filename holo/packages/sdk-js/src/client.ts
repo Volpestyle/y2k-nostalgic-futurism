@@ -20,6 +20,20 @@ export type JobStatusResponse = {
   };
 };
 
+export type ModelInputSpec = {
+  name: string;
+  type: "string" | "number" | "boolean" | "select";
+  label?: string;
+  description?: string;
+  default?: string | number | boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: { label: string; value: string }[];
+  placeholder?: string;
+  multiline?: boolean;
+};
+
 export type ModelCapabilities = {
   text: boolean;
   vision: boolean;
@@ -40,14 +54,23 @@ export type ModelMetadata = {
   deprecated?: boolean;
   inPreview?: boolean;
   available?: boolean;
+  inputs?: ModelInputSpec[];
 };
 
 export interface HoloClient {
-  createJob(args: { image: File | Blob; bakeSpec?: BakeSpec | unknown }): Promise<CreateJobResponse>;
+  createJob(args: {
+    image: File | Blob;
+    bakeSpec?: BakeSpec | unknown;
+    pipelineConfig?: Record<string, unknown>;
+  }): Promise<CreateJobResponse>;
   getJob(jobId: string): Promise<JobStatusResponse>;
   getResultUrl(jobId: string): string;
   listJobs(args?: { status?: JobStatusResponse["status"]; limit?: number }): Promise<JobStatusResponse[]>;
-  listProviderModels(args?: { providers?: string[]; refresh?: boolean }): Promise<ModelMetadata[]>;
+  listProviderModels(args?: {
+    providers?: string[];
+    refresh?: boolean;
+    allowFallback?: boolean;
+  }): Promise<ModelMetadata[]>;
 }
 
 type ApiJobStatus = {
@@ -150,41 +173,13 @@ const normalizeJobStatus = (data: any): JobStatusResponse => {
 
 const DEFAULT_MODELS: ModelMetadata[] = [
   {
-    id: "bria/remove-background",
-    displayName: "Bria Remove Background",
+    id: "rmbg-1.4",
+    displayName: "RMBG 1.4",
     provider: "catalog",
     family: "cutout",
     capabilities: {
       text: false,
-      vision: true,
-      image: true,
-      tool_use: false,
-      structured_output: false,
-      reasoning: false
-    }
-  },
-  {
-    id: "jd7h/zero123plusplus",
-    displayName: "Zero123++",
-    provider: "catalog",
-    family: "views",
-    capabilities: {
-      text: false,
-      vision: true,
-      image: true,
-      tool_use: false,
-      structured_output: false,
-      reasoning: false
-    }
-  },
-  {
-    id: "chenxwh/depth-anything-v2",
-    displayName: "Depth Anything v2",
-    provider: "catalog",
-    family: "depth",
-    capabilities: {
-      text: false,
-      vision: true,
+      vision: false,
       image: true,
       tool_use: false,
       structured_output: false,
@@ -193,12 +188,124 @@ const DEFAULT_MODELS: ModelMetadata[] = [
   },
   {
     id: "bria/remove-background",
+    displayName: "Bria Remove Background (Replicate)",
+    provider: "catalog",
+    family: "cutout",
+    capabilities: {
+      text: false,
+      vision: false,
+      image: true,
+      tool_use: false,
+      structured_output: false,
+      reasoning: false
+    }
+  },
+  {
+    id: "stable-zero123",
+    displayName: "Stable Zero123 (safetensors)",
+    provider: "catalog",
+    family: "views",
+    capabilities: {
+      text: false,
+      vision: false,
+      image: true,
+      tool_use: false,
+      structured_output: false,
+      reasoning: false
+    }
+  },
+  {
+    id: "zero123-xl",
+    displayName: "Zero123 XL (safetensors)",
+    provider: "catalog",
+    family: "views",
+    capabilities: {
+      text: false,
+      vision: false,
+      image: true,
+      tool_use: false,
+      structured_output: false,
+      reasoning: false
+    }
+  },
+  {
+    id: "jd7h/zero123plusplus:c69c6559a29011b576f1ff0371b3bc1add2856480c60520c7e9ce0b40a6e9052",
+    displayName: "Zero123++ (Replicate)",
+    provider: "catalog",
+    family: "views",
+    capabilities: {
+      text: false,
+      vision: false,
+      image: true,
+      tool_use: false,
+      structured_output: false,
+      reasoning: false
+    }
+  },
+  {
+    id: "depth-anything-v2-small",
+    displayName: "Depth Anything v2 Small",
+    provider: "catalog",
+    family: "depth",
+    capabilities: {
+      text: false,
+      vision: false,
+      image: true,
+      tool_use: false,
+      structured_output: false,
+      reasoning: false
+    }
+  },
+  {
+    id: "depth-anything-v2-large",
+    displayName: "Depth Anything v2 Large",
+    provider: "catalog",
+    family: "depth",
+    capabilities: {
+      text: false,
+      vision: false,
+      image: true,
+      tool_use: false,
+      structured_output: false,
+      reasoning: false
+    }
+  },
+  {
+    id: "chenxwh/depth-anything-v2:b239ea33cff32bb7abb5db39ffe9a09c14cbc2894331d1ef66fe096eed88ebd4",
+    displayName: "Depth Anything v2 (Replicate)",
+    provider: "catalog",
+    family: "depth",
+    capabilities: {
+      text: false,
+      vision: false,
+      image: true,
+      tool_use: false,
+      structured_output: false,
+      reasoning: false
+    }
+  },
+  {
+    id: "poisson-recon",
+    displayName: "Poisson Reconstruction",
+    provider: "catalog",
+    family: "recon",
+    capabilities: {
+      text: false,
+      vision: false,
+      image: false,
+      tool_use: false,
+      structured_output: false,
+      reasoning: false
+    }
+  },
+  {
+    id: "bria/remove-background",
     displayName: "Bria Remove Background",
     provider: "replicate",
     family: "cutout",
     capabilities: {
       text: false,
-      vision: true,
+      vision: false,
       image: true,
       tool_use: false,
       structured_output: false,
@@ -206,13 +313,13 @@ const DEFAULT_MODELS: ModelMetadata[] = [
     }
   },
   {
-    id: "jd7h/zero123plusplus",
+    id: "jd7h/zero123plusplus:c69c6559a29011b576f1ff0371b3bc1add2856480c60520c7e9ce0b40a6e9052",
     displayName: "Zero123++",
     provider: "replicate",
     family: "views",
     capabilities: {
       text: false,
-      vision: true,
+      vision: false,
       image: true,
       tool_use: false,
       structured_output: false,
@@ -220,13 +327,13 @@ const DEFAULT_MODELS: ModelMetadata[] = [
     }
   },
   {
-    id: "chenxwh/depth-anything-v2",
+    id: "chenxwh/depth-anything-v2:b239ea33cff32bb7abb5db39ffe9a09c14cbc2894331d1ef66fe096eed88ebd4",
     displayName: "Depth Anything v2",
     provider: "replicate",
     family: "depth",
     capabilities: {
       text: false,
-      vision: true,
+      vision: false,
       image: true,
       tool_use: false,
       structured_output: false,
@@ -240,7 +347,7 @@ const DEFAULT_MODELS: ModelMetadata[] = [
     family: "recon",
     capabilities: {
       text: false,
-      vision: true,
+      vision: false,
       image: true,
       tool_use: false,
       structured_output: false,
@@ -266,11 +373,14 @@ export function createHoloClient(baseUrl: string): HoloClient {
   const root = baseUrl.replace(/\/$/, "");
 
   return {
-    async createJob({ image, bakeSpec }) {
+    async createJob({ image, bakeSpec, pipelineConfig }) {
       const form = new FormData();
       form.append("file", image);
       if (bakeSpec) {
         form.append("bakeSpec", JSON.stringify(bakeSpec));
+      }
+      if (pipelineConfig) {
+        form.append("pipelineConfig", JSON.stringify(pipelineConfig));
       }
       const res = await fetch(`${root}/v1/jobs`, { method: "POST", body: form });
       if (!res.ok) throw new Error(`createJob failed: ${res.status} ${await res.text()}`);
@@ -319,8 +429,26 @@ export function createHoloClient(baseUrl: string): HoloClient {
     },
 
     async listProviderModels(args) {
-      if (!args?.providers?.length) return DEFAULT_MODELS;
-      return DEFAULT_MODELS.filter((model) => args.providers?.includes(model.provider));
+      const params = new URLSearchParams();
+      if (args?.providers?.length) {
+        params.set("providers", args.providers.join(","));
+      }
+      if (args?.refresh) {
+        params.set("refresh", "true");
+      }
+      const query = params.toString();
+      const url = `${root}/v1/ai/provider-models${query ? `?${query}` : ""}`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`listProviderModels failed: ${res.status} ${await res.text()}`);
+        return (await res.json()) as ModelMetadata[];
+      } catch (error) {
+        if (!args?.allowFallback) {
+          throw error;
+        }
+        if (!args?.providers?.length) return DEFAULT_MODELS;
+        return DEFAULT_MODELS.filter((model) => args.providers?.includes(model.provider));
+      }
     },
 
   };
