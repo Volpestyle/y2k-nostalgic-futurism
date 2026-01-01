@@ -1135,10 +1135,6 @@ body[data-theme="light"] .hudArtifactPlaceholder {
 
 /* Progress Bar Component */
 .hudProgressContainer {
-  --hud-progress-stage-count: 5;
-  --hud-progress-stage-count-minus-one: 4;
-  --hud-progress-stage-gap: 4px;
-  --hud-progress-stage-padding: 2px;
   --hud-progress-offset: 0px;
   --hud-progress-span: 100%;
   margin-top: 16px;
@@ -1160,7 +1156,6 @@ body[data-theme="light"] .hudArtifactPlaceholder {
   letter-spacing: 0.06em;
   color: var(--lounge-ink);
   text-transform: capitalize;
-  animation: hudStatusPulse 2s ease-in-out infinite;
 }
 
 .hudProgressStatus[data-status="idle"] {
@@ -1170,7 +1165,6 @@ body[data-theme="light"] .hudArtifactPlaceholder {
 
 .hudProgressStatus[data-status="done"] {
   color: var(--lounge-accent);
-  animation: hudStatusGlow 1.5s ease-in-out infinite;
 }
 
 .hudProgressStatus[data-status="error"] {
@@ -1232,8 +1226,6 @@ body[data-theme="light"] .hudProgressBarOuter {
     var(--lounge-accent-strong) 50%,
     var(--lounge-accent) 100%
   );
-  animation: hudBarShimmer 2s linear infinite;
-  background-size: 200% 100%;
 }
 
 .hudProgressBarInner[data-status="error"] {
@@ -1332,89 +1324,6 @@ body[data-theme="light"] .hudRebuildProgressTrack {
   transition: width 0.35s ease;
 }
 
-.hudProgressStages {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--hud-progress-stage-gap);
-  padding: 0 var(--hud-progress-stage-padding);
-}
-
-.hudProgressStage {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-}
-
-.hudProgressStageDot {
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  border: 2px solid var(--lounge-hud-border);
-  background: rgba(20, 30, 44, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--lounge-sidebar-muted);
-  transition: all 0.3s ease;
-}
-
-body[data-theme="light"] .hudProgressStageDot {
-  background: rgba(230, 235, 242, 0.9);
-}
-
-.hudProgressStageDot svg {
-  width: 12px;
-  height: 12px;
-}
-
-.hudProgressStage[data-started="true"] .hudProgressStageDot {
-  border-color: rgba(71, 247, 212, 0.5);
-  color: var(--lounge-ink);
-}
-
-.hudProgressStage[data-active="true"] .hudProgressStageDot {
-  border-color: var(--lounge-accent);
-  background: rgba(71, 247, 212, 0.15);
-  color: var(--lounge-accent);
-  box-shadow: 0 0 12px rgba(71, 247, 212, 0.4);
-  animation: hudDotPulse 1.5s ease-in-out infinite;
-}
-
-.hudProgressStage[data-complete="true"] .hudProgressStageDot {
-  border-color: var(--lounge-accent);
-  background: var(--lounge-accent);
-  color: #05070c;
-  box-shadow: 0 0 8px rgba(71, 247, 212, 0.5);
-  animation: none;
-}
-
-.hudProgressStageLabel {
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--lounge-sidebar-muted);
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-  transition: color 0.3s ease;
-}
-
-.hudProgressStage[data-active="true"] .hudProgressStageLabel {
-  color: var(--lounge-accent);
-}
-
-.hudProgressStage[data-complete="true"] .hudProgressStageLabel {
-  color: var(--lounge-ink);
-}
-
 .hudProgressJobId {
   display: flex;
   align-items: center;
@@ -1431,44 +1340,6 @@ body[data-theme="light"] .hudProgressStageDot {
   font-size: 10px;
   color: var(--lounge-ink);
   opacity: 0.7;
-}
-
-@keyframes hudStatusPulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
-}
-
-@keyframes hudStatusGlow {
-  0%, 100% {
-    text-shadow: 0 0 8px rgba(71, 247, 212, 0.6);
-  }
-  50% {
-    text-shadow: 0 0 16px rgba(71, 247, 212, 0.9), 0 0 24px rgba(71, 247, 212, 0.4);
-  }
-}
-
-@keyframes hudDotPulse {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 12px rgba(71, 247, 212, 0.4);
-  }
-  50% {
-    transform: scale(1.1);
-    box-shadow: 0 0 18px rgba(71, 247, 212, 0.6);
-  }
-}
-
-@keyframes hudBarShimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
 }
 
 @keyframes loungeDrop {

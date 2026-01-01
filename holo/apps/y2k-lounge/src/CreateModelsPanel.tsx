@@ -47,7 +47,13 @@ const defaultViewsPrompt =
 const defaultReconPrompt =
   "Generate a 3D mesh from the input multi-view images.";
 const PIPELINE_STORAGE_KEY = "y2k-lounge.pipeline-selection";
-const PIPELINE_STAGES = ["normalize", "remove_bg", "multiview", "depth", "recon"];
+const PIPELINE_STAGES = [
+  "normalize",
+  "remove_bg",
+  "multiview",
+  "depth",
+  "recon",
+];
 
 type ViewManifestEntry = {
   id?: string;
@@ -1124,14 +1130,6 @@ export function CreateModelsPanel({
       };
     });
   }, [depthManifest, getArtifactUrl]);
-  const stageProgressItems = useMemo(
-    () =>
-      PIPELINE_STAGES.map((stage) => ({
-        stage,
-        progress: stageProgress[stage],
-      })).filter((item) => typeof item.progress === "number"),
-    [stageProgress]
-  );
   const activeStage = useMemo(() => {
     let lastStage: string | null = null;
     for (const stage of PIPELINE_STAGES) {
@@ -1667,6 +1665,9 @@ export function CreateModelsPanel({
       reconConfig.prompt = reconPrompt;
       if (reconFormat.trim()) {
         reconConfig.format = reconFormat.trim();
+      }
+      if (reconParameters) {
+        reconConfig.parameters = reconParameters;
       }
     } else {
       reconConfig.method = reconMethod;
@@ -2612,9 +2613,7 @@ export function CreateModelsPanel({
               </div>
               <div
                 className="hudRebuildProgressTrack"
-                style={
-                  { "--progress": rebuildProgress } as React.CSSProperties
-                }
+                style={{ "--progress": rebuildProgress } as React.CSSProperties}
               >
                 <div className="hudRebuildProgressFill" />
               </div>
@@ -2705,7 +2704,7 @@ export function CreateModelsPanel({
               (!modelsLoaded ? "Model list still loading." : undefined)
             }
           >
-            Start bake
+            Create model
           </Button>
           <Badge className="hudBadge">
             API {client.getResultUrl("<job>").split("/v1/")[0]}
@@ -2713,22 +2712,10 @@ export function CreateModelsPanel({
         </div>
         {apiSelectionError && <Hint>{apiSelectionError}</Hint>}
 
-        <div
-          className="hudProgressContainer"
-          data-status={status}
-          style={
-            {
-              "--hud-progress-stage-count": PIPELINE_STAGES.length,
-              "--hud-progress-stage-count-minus-one": Math.max(
-                PIPELINE_STAGES.length - 1,
-                0
-              ),
-            } as React.CSSProperties
-          }
-        >
+        <div className="hudProgressContainer" data-status={status}>
           <div className="hudProgressHeader">
             <span className="hudProgressStatus" data-status={status}>
-              {status === "idle" && "Ready to forge"}
+              {status === "idle" && "Ready"}
               {status === "uploading" && "Uploading image..."}
               {status === "queued" && "Queued for processing..."}
               {status === "loading" && "Loading job..."}
@@ -2755,39 +2742,6 @@ export function CreateModelsPanel({
               style={{ "--progress": progress } as React.CSSProperties}
             />
             <div className="hudProgressBarScanlines" />
-          </div>
-
-          <div className="hudProgressStages">
-            {PIPELINE_STAGES.map((stage, idx) => {
-              const stageData = stageProgressItems.find(
-                (s) => s.stage === stage
-              );
-              const isActive = activeStage === stage;
-              const isComplete = (stageData?.progress ?? 0) >= 1;
-              const hasStarted = stageData !== undefined;
-              return (
-                <div
-                  key={stage}
-                  className="hudProgressStage"
-                  data-active={isActive}
-                  data-complete={isComplete}
-                  data-started={hasStarted}
-                >
-                  <div className="hudProgressStageDot">
-                    {isComplete ? (
-                      <svg viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                      </svg>
-                    ) : (
-                      <span>{idx + 1}</span>
-                    )}
-                  </div>
-                  <span className="hudProgressStageLabel">
-                    {stage.replace(/_/g, " ")}
-                  </span>
-                </div>
-              );
-            })}
           </div>
 
           {jobId && (
