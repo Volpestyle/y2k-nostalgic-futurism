@@ -25,6 +25,7 @@ export type ViewerControlsOptions = {
   maxDistance?: number;
   target?: [number, number, number];
   lockPanTarget?: boolean;
+  pinchZoomSensitivity?: number;
 };
 
 const DEFAULT_POST: Required<PostParams> = {
@@ -36,6 +37,17 @@ const DEFAULT_POST: Required<PostParams> = {
   chroma: 0.0018,
   noise: 0.05,
   vignette: 0.28,
+};
+
+const DEFAULT_PINCH_ZOOM_SENSITIVITY = 1.35;
+
+type ArcballControlsPinchTuning = ArcballControls & {
+  _pinchZoomPatched?: boolean;
+  _pinchZoomActive?: boolean;
+  _pinchZoomSensitivity?: number;
+  onPinchStart?: () => void;
+  onPinchEnd?: () => void;
+  scale?: (size: number, point: THREE.Vector3, scaleGizmos?: boolean) => THREE.Matrix4;
 };
 
 export class BasicGltfViewer {
@@ -58,6 +70,7 @@ export class BasicGltfViewer {
   private post?: PostProcessing;
   private postEnabled = false;
   private lockPanTarget = false;
+  private pinchZoomSensitivity = DEFAULT_PINCH_ZOOM_SENSITIVITY;
 
   constructor(opts: ViewerOptions) {
     const { canvas, dpr = Math.min(window.devicePixelRatio || 1, 2) } = opts;
@@ -74,6 +87,7 @@ export class BasicGltfViewer {
     this.controls = new ArcballControls(this.camera, canvas, this.scene);
     this.controls.setGizmosVisible(false);
     this.controls.enableAnimations = true;
+    this.applyPinchZoomSensitivity();
 
     this.loader = new GLTFLoader();
     this.plyLoader = new PLYLoader();
@@ -121,6 +135,10 @@ export class BasicGltfViewer {
     if (options.minDistance !== undefined) this.controls.minDistance = options.minDistance;
     if (options.maxDistance !== undefined) this.controls.maxDistance = options.maxDistance;
     if (options.lockPanTarget !== undefined) this.lockPanTarget = options.lockPanTarget;
+    if (options.pinchZoomSensitivity !== undefined) {
+      this.pinchZoomSensitivity = Math.max(0.1, options.pinchZoomSensitivity);
+      this.applyPinchZoomSensitivity();
+    }
     if (options.target) {
       this.controls.target.set(options.target[0], options.target[1], options.target[2]);
     }
@@ -373,6 +391,44 @@ export class BasicGltfViewer {
     } else if (params) {
       this.post.setParams(params);
     }
+  }
+
+  private applyPinchZoomSensitivity() {
+    const controls = this.controls as ArcballControlsPinchTuning;
+    controls._pinchZoomSensitivity = Math.max(0.1, this.pinchZoomSensitivity);
+
+    if (controls._pinchZoomPatched) return;
+
+    const baseOnPinchStart = controls.onPinchStart?.bind(controls);
+    const baseOnPinchEnd = controls.onPinchEnd?.bind(controls);
+    const baseScale = controls.scale?.bind(controls);
+
+    if (!baseOnPinchStart || !baseOnPinchEnd || !baseScale) {
+      return;
+    }
+
+    controls.onPinchStart = () => {
+      baseOnPinchStart();
+      if (controls.enabled && controls.enableZoom) {
+        controls._pinchZoomActive = true;
+      }
+    };
+
+    controls.onPinchEnd = () => {
+      controls._pinchZoomActive = false;
+      baseOnPinchEnd();
+    };
+
+    controls.scale = (size, point, scaleGizmos = true) => {
+      const sensitivity = controls._pinchZoomSensitivity ?? 1;
+      if (controls._pinchZoomActive && sensitivity !== 1) {
+        size = 1 + (size - 1) * sensitivity;
+      }
+      return baseScale(size, point, scaleGizmos);
+    };
+
+    controls._pinchZoomActive = false;
+    controls._pinchZoomPatched = true;
   }
 
   private disposeObject(obj: THREE.Object3D) {
