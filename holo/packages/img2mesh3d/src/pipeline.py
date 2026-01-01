@@ -13,7 +13,7 @@ from .artifacts import ArtifactRef, ArtifactStore, LocalArtifactStore
 from .config import PipelineConfig
 from .events import Emitter, PipelineEvent, ThreadSafeEmitter, now_ns
 from .local_recon import LocalReconstructor
-from ai_kit.clients import ReplicateClient
+from ai_kit.clients import ReplicateClient, FalClient
 
 logger = logging.getLogger("img2mesh3d.pipeline")
 
@@ -84,9 +84,11 @@ class ImageTo3DPipeline:
         config: Optional[PipelineConfig] = None,
         *,
         replicate_client: Optional[ReplicateClient] = None,
+        fal_client: Optional[FalClient] = None,
     ):
         self.config = config or PipelineConfig.from_env()
         self.replicate = replicate_client or ReplicateClient(use_file_output=self.config.replicate_use_file_output)
+        self.fal = fal_client
 
     def run(
         self,
@@ -340,26 +342,84 @@ class ImageTo3DPipeline:
         publish_manifest()
         report("depth", 1.0)
 
-        # Step 4: local reconstruction
-        report("recon", 0.0, "Reconstructing mesh locally")
-        logger.info("recon method=%s fusion=%s", self.config.recon_method, self.config.recon_fusion)
-        recon = LocalReconstructor(self.config)
-        recon_out = recon.run(view_paths=view_paths, depth_paths=depth_paths, out_dir=workspace / "recon")
-
         glb_ref: Optional[ArtifactRef] = None
-        manifest["steps"]["recon"] = {}
-        if recon_out.mesh_path:
-            glb_ref = publish_file("recon/model.glb", recon_out.mesh_path, content_type="model/gltf-binary")
-            manifest["steps"]["recon"]["glb"] = "recon/model.glb"
-        if recon_out.texture_path:
-            publish_file("recon/albedo.png", recon_out.texture_path, content_type="image/png")
-            manifest["steps"]["recon"]["albedo"] = "recon/albedo.png"
-        if recon_out.point_cloud_path:
-            publish_file("recon/points.ply", recon_out.point_cloud_path, content_type="application/octet-stream")
-            manifest["steps"]["recon"]["points"] = "recon/points.ply"
+        recon_provider = (self.config.recon_provider or "").strip().lower()
+        if recon_provider == "fal":
+            report("recon", 0.0, "Generating mesh via fal Tripo3D")
+            model_id = self.config.recon_model or "tripo3d/tripo/v2.5/multiview-to-3d"
+            logger.info("recon provider=fal model=%s", model_id)
 
-        report("recon", 1.0)
-        publish_manifest()
+            def _fal_log(message: str) -> None:
+                emit(PipelineEvent(kind="log", stage="recon", ts_ns=now_ns(), message=f"fal: {message}"))
+
+            report("recon", 0.1, "Uploading views to fal")
+            fal = self.fal or FalClient()
+            selected = self._select_fal_views(view_paths)
+            view_urls = {name: fal.upload_file(path) for name, path in selected.items()}
+
+            report("recon", 0.4, "Waiting for fal model generation")
+            params = dict(self.config.recon_params or {})
+            params.pop("front_image_url", None)
+            params.pop("left_image_url", None)
+            params.pop("back_image_url", None)
+            params.pop("right_image_url", None)
+            result = fal.multiview_to_3d(
+                model=model_id,
+                front_image_url=view_urls["front"],
+                left_image_url=view_urls.get("left"),
+                back_image_url=view_urls.get("back"),
+                right_image_url=view_urls.get("right"),
+                parameters=params or None,
+                on_log=_fal_log,
+            )
+
+            report("recon", 0.85, "Downloading generated model")
+            model_url = self._pick_fal_file_url(result, "model_mesh", "pbr_model", "base_model")
+            if not model_url:
+                raise RuntimeError("fal response missing model URL")
+            glb_path = workspace / "recon" / "model.glb"
+            _write_bytes(glb_path, fal.download_url(model_url))
+            glb_ref = publish_file("recon/model.glb", glb_path, content_type="model/gltf-binary")
+
+            recon_step: Dict[str, Any] = {"glb": "recon/model.glb", "provider": "fal", "model": model_id}
+            task_id = result.get("task_id")
+            if task_id:
+                recon_step["task_id"] = str(task_id)
+
+            preview_entry = result.get("rendered_image")
+            if isinstance(preview_entry, dict):
+                preview_url = preview_entry.get("url")
+                content_type = str(preview_entry.get("content_type") or "")
+                if preview_url:
+                    ext = "webp" if "webp" in content_type else "png" if "png" in content_type else "jpg"
+                    preview_path = workspace / "recon" / f"preview.{ext}"
+                    _write_bytes(preview_path, fal.download_url(str(preview_url)))
+                    publish_file(f"recon/preview.{ext}", preview_path, content_type=content_type or None)
+                    recon_step["preview"] = f"recon/preview.{ext}"
+
+            manifest["steps"]["recon"] = recon_step
+            report("recon", 1.0)
+            publish_manifest()
+        else:
+            # Step 4: local reconstruction
+            report("recon", 0.0, "Reconstructing mesh locally")
+            logger.info("recon method=%s fusion=%s", self.config.recon_method, self.config.recon_fusion)
+            recon = LocalReconstructor(self.config)
+            recon_out = recon.run(view_paths=view_paths, depth_paths=depth_paths, out_dir=workspace / "recon")
+
+            manifest["steps"]["recon"] = {}
+            if recon_out.mesh_path:
+                glb_ref = publish_file("recon/model.glb", recon_out.mesh_path, content_type="model/gltf-binary")
+                manifest["steps"]["recon"]["glb"] = "recon/model.glb"
+            if recon_out.texture_path:
+                publish_file("recon/albedo.png", recon_out.texture_path, content_type="image/png")
+                manifest["steps"]["recon"]["albedo"] = "recon/albedo.png"
+            if recon_out.point_cloud_path:
+                publish_file("recon/points.ply", recon_out.point_cloud_path, content_type="application/octet-stream")
+                manifest["steps"]["recon"]["points"] = "recon/points.ply"
+
+            report("recon", 1.0)
+            publish_manifest()
 
         return PipelineResult(
             job_id=job_id,
@@ -367,6 +427,58 @@ class ImageTo3DPipeline:
             glb=glb_ref,
             manifest=manifest,
         )
+
+    @staticmethod
+    def _angle_distance(a: float, b: float) -> float:
+        return abs(((a - b + 180.0) % 360.0) - 180.0)
+
+    def _select_fal_views(self, view_paths: List[Path]) -> Dict[str, Path]:
+        total = len(view_paths)
+        if total == 0:
+            raise RuntimeError("No multiview images available for fal recon")
+
+        recon = LocalReconstructor(self.config)
+        indices = recon._select_views(total)
+        if not indices:
+            indices = list(range(total))
+
+        angles = recon._default_angles(total)
+        targets = {
+            "front": 0.0,
+            "right": 90.0,
+            "back": 180.0,
+            "left": 270.0,
+        }
+        selected: Dict[str, Path] = {}
+        used: set[int] = set()
+        for name, target in targets.items():
+            best_idx = None
+            best_diff = None
+            for idx in indices:
+                if idx in used or idx >= len(angles):
+                    continue
+                az = angles[idx][0]
+                diff = self._angle_distance(az, target)
+                if best_diff is None or diff < best_diff:
+                    best_idx = idx
+                    best_diff = diff
+            if best_idx is not None:
+                selected[name] = view_paths[best_idx]
+                used.add(best_idx)
+
+        if "front" not in selected:
+            selected["front"] = view_paths[indices[0] if indices else 0]
+        return selected
+
+    @staticmethod
+    def _pick_fal_file_url(result: Dict[str, Any], *keys: str) -> Optional[str]:
+        for key in keys:
+            entry = result.get(key)
+            if isinstance(entry, dict):
+                url = entry.get("url")
+                if url:
+                    return str(url)
+        return None
 
 
 def _write_bytes(path: Path, data: bytes) -> None:

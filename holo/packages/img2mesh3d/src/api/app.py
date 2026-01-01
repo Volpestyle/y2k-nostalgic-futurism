@@ -145,6 +145,16 @@ def _bake_spec_to_overrides(spec: Dict[str, Any]) -> Dict[str, Any]:
         overrides["camera_fov_deg"] = float(views["fovDeg"])
     if isinstance(views, dict) and isinstance(views.get("elevDeg"), (int, float)):
         overrides["views_elev_deg"] = float(views["elevDeg"])
+    if isinstance(recon, dict) and recon.get("provider"):
+        overrides["recon_provider"] = str(recon["provider"])
+    if isinstance(recon, dict) and recon.get("model"):
+        overrides["recon_model"] = str(recon["model"])
+    if isinstance(recon, dict) and recon.get("prompt"):
+        overrides["recon_prompt"] = str(recon["prompt"])
+    if isinstance(recon, dict) and recon.get("format"):
+        overrides["recon_format"] = str(recon["format"])
+    if isinstance(recon, dict) and isinstance(recon.get("parameters"), dict):
+        overrides["recon_params"] = recon["parameters"]
     if isinstance(recon, dict) and recon.get("method"):
         overrides["recon_method"] = str(recon["method"])
     if isinstance(recon, dict) and isinstance(recon.get("voxelSize"), (int, float)):

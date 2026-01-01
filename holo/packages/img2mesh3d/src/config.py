@@ -34,6 +34,11 @@ class PipelineConfig(BaseModel):
     multiview_params: Dict[str, Any] = Field(default_factory=dict)
     depth_params: Dict[str, Any] = Field(default_factory=dict)
     # Local reconstruction options
+    recon_provider: Optional[str] = Field(default=None)
+    recon_model: Optional[str] = Field(default=None)
+    recon_prompt: Optional[str] = Field(default=None)
+    recon_format: Optional[str] = Field(default=None)
+    recon_params: Dict[str, Any] = Field(default_factory=dict)
     recon_method: str = Field(default="poisson")  # poisson | alpha
     recon_fusion: str = Field(default="points")  # points | tsdf
     recon_voxel_size: float = Field(default=0.006, ge=0.0)
@@ -101,6 +106,10 @@ class PipelineConfig(BaseModel):
           - IMG2MESH3D_REMOVE_BG_MODEL
           - IMG2MESH3D_MULTIVIEW_MODEL
           - IMG2MESH3D_DEPTH_MODEL
+          - IMG2MESH3D_RECON_PROVIDER
+          - IMG2MESH3D_RECON_MODEL
+          - IMG2MESH3D_RECON_PROMPT
+          - IMG2MESH3D_RECON_FORMAT
           - IMG2MESH3D_RECON_METHOD
           - IMG2MESH3D_RECON_FUSION
           - IMG2MESH3D_RECON_VOXEL_SIZE
@@ -126,6 +135,14 @@ class PipelineConfig(BaseModel):
             data["multiview_model"] = os.getenv("IMG2MESH3D_MULTIVIEW_MODEL")
         if os.getenv("IMG2MESH3D_DEPTH_MODEL"):
             data["depth_model"] = os.getenv("IMG2MESH3D_DEPTH_MODEL")
+        if os.getenv("IMG2MESH3D_RECON_PROVIDER"):
+            data["recon_provider"] = os.getenv("IMG2MESH3D_RECON_PROVIDER")
+        if os.getenv("IMG2MESH3D_RECON_MODEL"):
+            data["recon_model"] = os.getenv("IMG2MESH3D_RECON_MODEL")
+        if os.getenv("IMG2MESH3D_RECON_PROMPT"):
+            data["recon_prompt"] = os.getenv("IMG2MESH3D_RECON_PROMPT")
+        if os.getenv("IMG2MESH3D_RECON_FORMAT"):
+            data["recon_format"] = os.getenv("IMG2MESH3D_RECON_FORMAT")
         if os.getenv("IMG2MESH3D_RECON_METHOD"):
             data["recon_method"] = os.getenv("IMG2MESH3D_RECON_METHOD")
         if os.getenv("IMG2MESH3D_RECON_FUSION"):

@@ -48,6 +48,7 @@ export const BakeSpecSchema = z.object({
       model: z.string().optional(),
       prompt: z.string().optional(),
       format: z.string().optional(),
+      parameters: z.record(z.unknown()).optional(),
       method: z.enum(["poisson", "alpha"/*, "gsplat"*/]).default("poisson"),
       voxelSize: z.number().min(0).default(0.006),
       points: z
