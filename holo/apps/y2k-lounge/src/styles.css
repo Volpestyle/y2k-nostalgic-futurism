@@ -837,8 +837,18 @@ body[data-theme="light"] .sidebarTab.isActive {
   box-shadow: inset 0 0 18px rgba(71, 247, 212, 0.08);
 }
 
+.hudPipelineStage[data-disabled="true"] {
+  opacity: 0.55;
+  filter: saturate(0.65);
+  box-shadow: inset 0 0 18px rgba(71, 247, 212, 0.03);
+}
+
 body[data-theme="light"] .hudPipelineStage {
   background: linear-gradient(135deg, rgba(248, 248, 244, 0.95), rgba(235, 236, 230, 0.96));
+}
+
+.hudPipelineStage[data-disabled="true"] .hudPipelineTitle {
+  color: var(--lounge-sidebar-muted);
 }
 
 .hudPipelineHeader {
@@ -863,6 +873,26 @@ body[data-theme="light"] .hudPipelineStage {
   letter-spacing: 0.2em;
   color: var(--lounge-sidebar-muted);
   margin-top: 4px;
+}
+
+.hudPipelineHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hudStageBadge {
+  font-size: 9px;
+  padding: 4px 8px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--lounge-sidebar-muted);
+  border-color: var(--lounge-edge);
+  background: rgba(6, 10, 16, 0.7);
+}
+
+body[data-theme="light"] .hudStageBadge {
+  background: rgba(220, 224, 232, 0.7);
 }
 
 .hudSourceToggle {

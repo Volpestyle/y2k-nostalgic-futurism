@@ -26,8 +26,10 @@ import {
   WindowTitle
 } from "@holo/ui-kit";
 import { VisualizerPanel } from "./VisualizerPanel";
+import { getAuthHeader, initAuth } from "./auth";
 
-const client = createHoloClient(import.meta.env.VITE_API_BASE_URL || "http://localhost:8080");
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const client = createHoloClient(API_BASE_URL, { getAuthHeader });
 const defaultCaptionPrompt =
   "Describe the subject and materials in this image for 3D reconstruction. Keep it brief.";
 type PipelineSource = "local" | "api";
@@ -52,6 +54,18 @@ const filterModelsByFamily = (models: ModelMetadata[], family: string) => {
     return models;
   }
   return models.filter((model) => model.family === family);
+};
+
+const getFixedViewsCount = (modelId: string) => {
+  const lowered = modelId.toLowerCase();
+  if (lowered.includes("zero123")) return 6;
+  if (lowered.includes("era-3d") || lowered.includes("era3d")) return 6;
+  return null;
+};
+
+const viewsModelIsGeminiImage = (modelId: string) => {
+  const lowered = modelId.toLowerCase();
+  return lowered.includes("gemini") && lowered.includes("image");
 };
 
 export function App() {
@@ -84,11 +98,16 @@ export function App() {
   const [viewsModel, setViewsModel] = useState("jd7h/zero123plusplus");
   const [viewsProvider, setViewsProvider] = useState("replicate");
   const [viewsApiModel, setViewsApiModel] = useState("");
-  const [viewsCount, setViewsCount] = useState(8);
+  const [viewsCount, setViewsCount] = useState(4);
+  const [viewsCountAuto, setViewsCountAuto] = useState(true);
   const [captionEnabled, setCaptionEnabled] = useState(false);
   const [captionProvider, setCaptionProvider] = useState("openai");
   const [captionModel, setCaptionModel] = useState("gpt-4o-mini");
   const [captionPrompt, setCaptionPrompt] = useState(defaultCaptionPrompt);
+
+  useEffect(() => {
+    initAuth();
+  }, []);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -188,6 +207,27 @@ export function App() {
   const captionProviderValue = providerOptions.length > 0 ? captionProvider : "";
   const captionModelValue = providerModels.length > 0 ? captionModel : "";
   const viewsModelValue = viewsOptions.length > 0 ? viewsModel : "";
+  const selectedViewsModelId = viewsSource === "api" ? viewsApiModelValue : viewsModelValue;
+  const fixedViewsCount = selectedViewsModelId
+    ? getFixedViewsCount(selectedViewsModelId)
+    : null;
+  const hasFixedViewsCount = fixedViewsCount !== null;
+  const isGeminiViews =
+    !!selectedViewsModelId && viewsModelIsGeminiImage(selectedViewsModelId);
+
+  useEffect(() => {
+    if (!hasFixedViewsCount) return;
+    if (viewsCount !== fixedViewsCount) {
+      setViewsCount(fixedViewsCount ?? viewsCount);
+    }
+  }, [hasFixedViewsCount, fixedViewsCount, viewsCount]);
+
+  useEffect(() => {
+    if (!isGeminiViews || !viewsCountAuto) return;
+    if (viewsCount !== 4) {
+      setViewsCount(4);
+    }
+  }, [isGeminiViews, viewsCount, viewsCountAuto]);
 
   useEffect(() => {
     if (!visionModels.length) return;
@@ -671,17 +711,24 @@ export function App() {
                     </Label>
                   </FieldRow>
                 )}
-                <Label>
-                  View count: {viewsCount}
-                  <Input
-                    type="range"
-                    min={4}
-                    max={12}
-                    step={1}
-                    value={viewsCount}
-                    onChange={(e) => setViewsCount(Number(e.target.value))}
-                  />
-                </Label>
+                {hasFixedViewsCount ? (
+                  <Label>View count: {fixedViewsCount}</Label>
+                ) : (
+                  <Label>
+                    View count: {viewsCount}
+                    <Input
+                      type="range"
+                      min={4}
+                      max={12}
+                      step={1}
+                      value={viewsCount}
+                      onChange={(e) => {
+                        setViewsCount(Number(e.target.value));
+                        setViewsCountAuto(false);
+                      }}
+                    />
+                  </Label>
+                )}
                 {modelsError && <Hint>Model list error: {modelsError}</Hint>}
                 {modelsLoaded &&
                   !modelsError &&

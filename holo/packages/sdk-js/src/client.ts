@@ -73,6 +73,11 @@ export interface HoloClient {
   }): Promise<ModelMetadata[]>;
 }
 
+export type HoloClientOptions = {
+  fetch?: typeof fetch;
+  getAuthHeader?: () => Promise<Record<string, string>>;
+};
+
 type ApiJobStatus = {
   job_id: string;
   state?: string;
@@ -171,8 +176,14 @@ const normalizeJobStatus = (data: any): JobStatusResponse => {
   };
 };
 
-export function createHoloClient(baseUrl: string): HoloClient {
+export function createHoloClient(baseUrl: string, options: HoloClientOptions = {}): HoloClient {
   const root = baseUrl.replace(/\/$/, "");
+  const fetchImpl = options.fetch ?? fetch;
+
+  const buildAuthHeaders = async () => {
+    if (!options.getAuthHeader) return {};
+    return options.getAuthHeader();
+  };
 
   return {
     async createJob({ image, bakeSpec, pipelineConfig }) {
@@ -184,7 +195,12 @@ export function createHoloClient(baseUrl: string): HoloClient {
       if (pipelineConfig) {
         form.append("pipelineConfig", JSON.stringify(pipelineConfig));
       }
-      const res = await fetch(`${root}/v1/jobs`, { method: "POST", body: form });
+      const authHeaders = await buildAuthHeaders();
+      const res = await fetchImpl(`${root}/v1/jobs`, {
+        method: "POST",
+        headers: authHeaders,
+        body: form,
+      });
       if (!res.ok) throw new Error(`createJob failed: ${res.status} ${await res.text()}`);
       const data = (await res.json()) as { jobId?: string; job_id?: string };
       const jobId = data.jobId || data.job_id;
@@ -205,7 +221,10 @@ export function createHoloClient(baseUrl: string): HoloClient {
     },
 
     async getJob(jobId) {
-      const res = await fetch(`${root}/v1/jobs/${jobId}`);
+      const authHeaders = await buildAuthHeaders();
+      const res = await fetchImpl(`${root}/v1/jobs/${jobId}`, {
+        headers: authHeaders,
+      });
       if (!res.ok) throw new Error(`getJob failed: ${res.status} ${await res.text()}`);
       const raw = await res.json();
       const job = normalizeJobStatus(raw);
@@ -228,7 +247,8 @@ export function createHoloClient(baseUrl: string): HoloClient {
       const query = params.toString();
       const url = `${root}/v1/jobs${query ? `?${query}` : ""}`;
       try {
-        const res = await fetch(url);
+        const authHeaders = await buildAuthHeaders();
+        const res = await fetchImpl(url, { headers: authHeaders });
         if (!res.ok) throw new Error(`listJobs failed: ${res.status} ${await res.text()}`);
         const raw = (await res.json()) as any;
         if (!Array.isArray(raw)) {
@@ -262,7 +282,8 @@ export function createHoloClient(baseUrl: string): HoloClient {
       const query = params.toString();
       const url = `${root}/v1/ai/provider-models${query ? `?${query}` : ""}`;
       try {
-        const res = await fetch(url);
+        const authHeaders = await buildAuthHeaders();
+        const res = await fetchImpl(url, { headers: authHeaders });
         if (!res.ok) throw new Error(`listProviderModels failed: ${res.status} ${await res.text()}`);
         return (await res.json()) as ModelMetadata[];
       } catch (error) {

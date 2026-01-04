@@ -12,6 +12,7 @@ import { AudioDock } from "./AudioDock";
 import { AudioLoungeProvider } from "./AudioLoungeContext";
 import { CreateModelsPanel } from "./CreateModelsPanel";
 import { LoungePanel } from "./LoungePanel";
+import { initAuth } from "./auth";
 
 type PageId = "lounge" | "create-models";
 type DockContent = "visualizer" | "model";
@@ -186,6 +187,10 @@ export function App() {
     if (sidebarWidth === null) return undefined;
     return { "--lounge-sidebar-width": `${Math.round(sidebarWidth)}px` } as React.CSSProperties;
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    initAuth();
+  }, []);
 
   useEffect(() => {
     document.body.dataset.theme = theme;

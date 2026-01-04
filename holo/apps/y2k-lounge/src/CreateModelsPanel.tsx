@@ -31,11 +31,13 @@ import {
   Textarea,
 } from "@holo/ui-kit";
 import { parseNpyFloat32 } from "./npy";
+import { getAuthHeader, isAuthRequired } from "./auth";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"
 ).replace(/\/$/, "");
-const client = createHoloClient(API_BASE_URL);
+const AUTH_REQUIRED = isAuthRequired();
+const client = createHoloClient(API_BASE_URL, { getAuthHeader });
 const defaultCaptionPrompt =
   "Describe the subject and materials in this image for 3D reconstruction. Keep it brief.";
 const defaultCutoutPrompt =
@@ -68,6 +70,8 @@ type ViewManifestEntry = {
 type ViewManifest = {
   version?: number;
   fov_deg?: number;
+  skipped?: boolean;
+  reason?: string;
   views?: ViewManifestEntry[];
 };
 
@@ -101,8 +105,43 @@ const getBasename = (raw: string) => {
 const depthModelUsesInverse = (modelId: string) =>
   modelId.toLowerCase().includes("depth-anything");
 
-const viewsModelUsesFixedViews = (modelId: string) =>
-  modelId.toLowerCase().includes("zero123");
+const getFixedViewsCount = (modelId: string) => {
+  const lowered = modelId.toLowerCase();
+  if (lowered.includes("zero123")) return 6;
+  if (lowered.includes("era-3d") || lowered.includes("era3d")) return 6;
+  return null;
+};
+
+const viewsModelIsGeminiImage = (modelId: string) => {
+  const lowered = modelId.toLowerCase();
+  return lowered.includes("gemini") && lowered.includes("image");
+};
+
+const normalizeModelId = (value: string) => value.trim().toLowerCase();
+
+const VIEW_MODELS_SKIP_CUTOUT = new Set(["fal-ai/era-3d"]);
+const RECON_DEPTHLESS_MODELS = new Set([
+  "tripo3d/tripo/v2.5/multiview-to-3d",
+]);
+const RECON_SINGLE_VIEW_SUPPORTED_MODELS = new Set([
+  "tripo3d/tripo/v2.5/multiview-to-3d",
+]);
+const RECON_SINGLE_VIEW_UNSUPPORTED_MODELS = new Set<string>();
+
+const supportsSingleViewReconModel = (modelId: string) => {
+  const normalized = normalizeModelId(modelId);
+  if (!normalized) return false;
+  if (RECON_SINGLE_VIEW_SUPPORTED_MODELS.has(normalized)) return true;
+  if (RECON_SINGLE_VIEW_UNSUPPORTED_MODELS.has(normalized)) return false;
+  if (
+    normalized.includes("multiview") ||
+    normalized.includes("multi-view") ||
+    normalized.includes("multi view")
+  ) {
+    return false;
+  }
+  return true;
+};
 
 const buildDepthPreview = (
   data: Float32Array,
@@ -170,6 +209,17 @@ const parseParameters = (raw: string) => {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
     return null;
   return parsed as Record<string, unknown>;
+};
+
+const parseBooleanParam = (value: unknown) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+  }
+  return false;
 };
 
 const resolveInputValue = (
@@ -374,7 +424,7 @@ const findModelById = (
 const PROVIDER_KEY_HINTS: Record<string, string> = {
   openai: "AI_KIT_OPENAI_API_KEY or OPENAI_API_KEY",
   anthropic: "AI_KIT_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY",
-  google: "AI_KIT_GOOGLE_API_KEY or GOOGLE_API_KEY",
+  google: "AI_KIT_GOOGLE_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY",
   xai: "AI_KIT_XAI_API_KEY or XAI_API_KEY",
   replicate: "AI_KIT_REPLICATE_API_KEY or REPLICATE_API_TOKEN",
   fal: "AI_KIT_FAL_API_KEY, FAL_API_KEY, or FAL_KEY",
@@ -524,8 +574,10 @@ export function CreateModelsPanel({
   const [models, setModels] = useState<ModelMetadata[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
   const [cutoutPreview, setCutoutPreview] = useState<string | null>(null);
   const [viewsManifest, setViewsManifest] = useState<ViewManifest | null>(null);
+  const [viewImages, setViewImages] = useState<Record<string, string>>({});
   const [depthManifest, setDepthManifest] = useState<ViewManifest | null>(null);
   const [depthPreviewImage, setDepthPreviewImage] = useState<string | null>(
     null
@@ -540,8 +592,11 @@ export function CreateModelsPanel({
     {}
   );
   const cutoutPreviewRef = useRef<string | null>(null);
+  const uploadPreviewRef = useRef<string | null>(null);
   const depthPreviewRef = useRef<string | null>(null);
+  const viewImageUrlsRef = useRef<string[]>([]);
   const depthMapUrlsRef = useRef<string[]>([]);
+  const viewImagesRef = useRef<Record<string, string>>({});
   const depthMapsRef = useRef<Record<string, string>>({});
   const pointsLoadedRef = useRef<string | null>(null);
   const artifactsLoadedRef = useRef({
@@ -553,6 +608,18 @@ export function CreateModelsPanel({
   const eventIdRef = useRef<number>(0);
   const refreshTimerRef = useRef<number | null>(null);
   const statusRef = useRef(status);
+
+  const fetchWithAuth = useCallback(
+    async (input: RequestInfo, init?: RequestInit) => {
+      const authHeaders = await getAuthHeader();
+      const headers = new Headers(init?.headers ?? {});
+      for (const [key, value] of Object.entries(authHeaders)) {
+        headers.set(key, value);
+      }
+      return fetch(input, { ...init, headers });
+    },
+    []
+  );
 
   const [cutoutSource, setCutoutSource] = useState<PipelineSource>(() =>
     normalizePipelineSource(storedPipelineSettings?.cutoutSource)
@@ -652,7 +719,8 @@ export function CreateModelsPanel({
   const [reconParametersRaw, setReconParametersRaw] = useState(
     storedPipelineSettings?.reconParameters || ""
   );
-  const [viewsCount, setViewsCount] = useState(8);
+  const [viewsCount, setViewsCount] = useState(4);
+  const [viewsCountAuto, setViewsCountAuto] = useState(true);
   const [pointsEnabled, setPointsEnabled] = useState(true);
   const [renderMode, setRenderMode] = useState<RenderMode>("mesh");
   const [captionEnabled, setCaptionEnabled] = useState(false);
@@ -715,14 +783,37 @@ export function CreateModelsPanel({
 
   useEffect(() => {
     return () => {
+      if (uploadPreviewRef.current) {
+        URL.revokeObjectURL(uploadPreviewRef.current);
+      }
       if (cutoutPreviewRef.current) {
         URL.revokeObjectURL(cutoutPreviewRef.current);
       }
       if (depthPreviewRef.current) {
         URL.revokeObjectURL(depthPreviewRef.current);
       }
+      for (const url of viewImageUrlsRef.current) {
+        URL.revokeObjectURL(url);
+      }
+      for (const url of depthMapUrlsRef.current) {
+        URL.revokeObjectURL(url);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (uploadPreviewRef.current) {
+      URL.revokeObjectURL(uploadPreviewRef.current);
+      uploadPreviewRef.current = null;
+    }
+    if (!modelFile) {
+      setUploadPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(modelFile);
+    uploadPreviewRef.current = url;
+    setUploadPreview(url);
+  }, [modelFile]);
 
   useEffect(() => {
     artifactsLoadedRef.current = {
@@ -736,6 +827,11 @@ export function CreateModelsPanel({
       URL.revokeObjectURL(url);
     }
     depthMapUrlsRef.current = [];
+    viewImagesRef.current = {};
+    for (const url of viewImageUrlsRef.current) {
+      URL.revokeObjectURL(url);
+    }
+    viewImageUrlsRef.current = [];
     pointsLoadedRef.current = null;
     if (cutoutPreviewRef.current) {
       URL.revokeObjectURL(cutoutPreviewRef.current);
@@ -747,6 +843,7 @@ export function CreateModelsPanel({
     }
     setCutoutPreview(null);
     setViewsManifest(null);
+    setViewImages({});
     setDepthManifest(null);
     setDepthPreviewImage(null);
     setDepthMaps({});
@@ -765,6 +862,10 @@ export function CreateModelsPanel({
   useEffect(() => {
     depthMapsRef.current = depthMaps;
   }, [depthMaps]);
+
+  useEffect(() => {
+    viewImagesRef.current = viewImages;
+  }, [viewImages]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -976,10 +1077,15 @@ export function CreateModelsPanel({
     (isViewsProviderAvailable && availableViewsProviderModels.length > 0
       ? viewsApiModel
       : "");
+  const viewsModelValue = viewsOptions.length > 0 ? viewsModel : "";
   const selectedViewsModelId =
     viewsSource === "api" ? viewsApiModelValue : viewsModelValue;
-  const isZero123ppViews =
-    !!selectedViewsModelId && viewsModelUsesFixedViews(selectedViewsModelId);
+  const fixedViewsCount = selectedViewsModelId
+    ? getFixedViewsCount(selectedViewsModelId)
+    : null;
+  const hasFixedViewsCount = fixedViewsCount !== null;
+  const isGeminiViews =
+    !!selectedViewsModelId && viewsModelIsGeminiImage(selectedViewsModelId);
   const reconProviderValue = isReconProviderAvailable ? reconProvider : "";
   const reconApiModelValue =
     reconApiModelOverride.trim() ||
@@ -993,7 +1099,6 @@ export function CreateModelsPanel({
     isCaptionProviderAvailable && availableProviderModels.length > 0
       ? captionModel
       : "";
-  const viewsModelValue = viewsOptions.length > 0 ? viewsModel : "";
   const cutoutApiSelection =
     cutoutProviderValue && cutoutApiModelValue
       ? buildApiKey(cutoutProviderValue, cutoutApiModelValue)
@@ -1050,6 +1155,62 @@ export function CreateModelsPanel({
     }
     return findModelById(models, reconProviderValue, reconApiModelValue);
   }, [models, reconSource, reconProviderValue, reconApiModelValue]);
+  const selectedReconModelId = useMemo(() => {
+    if (reconSource !== "api") return "";
+    const override = reconApiModelOverride.trim();
+    return override || reconApiModelValue || "";
+  }, [reconSource, reconApiModelOverride, reconApiModelValue]);
+  const depthStageDisabled = useMemo(() => {
+    if (reconSource !== "api") return false;
+    if ((reconProviderValue || "").toLowerCase() !== "fal") return false;
+    if (!selectedReconModelId) return false;
+    return RECON_DEPTHLESS_MODELS.has(normalizeModelId(selectedReconModelId));
+  }, [reconSource, reconProviderValue, selectedReconModelId]);
+  const reconSingleViewSupported = useMemo(() => {
+    if (!selectedReconModelId) return false;
+    return supportsSingleViewReconModel(selectedReconModelId);
+  }, [selectedReconModelId]);
+  const reconParametersParsed = useMemo(
+    () => parseParameters(reconParametersRaw),
+    [reconParametersRaw]
+  );
+  const reconSingleViewEnabled = useMemo(() => {
+    if (!reconParametersParsed) return false;
+    return (
+      parseBooleanParam(reconParametersParsed["singleView"]) ||
+      parseBooleanParam(reconParametersParsed["single_view"]) ||
+      parseBooleanParam(reconParametersParsed["falSingleView"]) ||
+      parseBooleanParam(reconParametersParsed["fal_single_view"])
+    );
+  }, [reconParametersParsed]);
+  const reconSingleViewForce = useMemo(() => {
+    if (!reconParametersParsed) return false;
+    return (
+      parseBooleanParam(reconParametersParsed["singleViewForce"]) ||
+      parseBooleanParam(reconParametersParsed["single_view_force"]) ||
+      parseBooleanParam(reconParametersParsed["falSingleViewForce"]) ||
+      parseBooleanParam(reconParametersParsed["fal_single_view_force"])
+    );
+  }, [reconParametersParsed]);
+  const viewsStageDisabled = useMemo(() => {
+    if (reconSource !== "api") return false;
+    if (!reconSingleViewEnabled) return false;
+    if ((reconProviderValue || "").toLowerCase() !== "fal") return false;
+    if (!selectedReconModelId) return false;
+    return reconSingleViewSupported || reconSingleViewForce;
+  }, [
+    reconSource,
+    reconSingleViewEnabled,
+    reconProviderValue,
+    selectedReconModelId,
+    reconSingleViewSupported,
+    reconSingleViewForce,
+  ]);
+  const cutoutStageDisabled = useMemo(() => {
+    if (viewsStageDisabled) return false;
+    if (!selectedViewsModelId) return false;
+    return VIEW_MODELS_SKIP_CUTOUT.has(normalizeModelId(selectedViewsModelId));
+  }, [viewsStageDisabled, selectedViewsModelId]);
   const apiSelectionError = useMemo(() => {
     const missing = [];
     if (
@@ -1130,6 +1291,8 @@ export function CreateModelsPanel({
       };
     });
   }, [depthManifest, getArtifactUrl]);
+  const viewsSkipped = Boolean(viewsManifest?.skipped);
+  const depthSkipped = Boolean(depthManifest?.skipped);
   const activeStage = useMemo(() => {
     let lastStage: string | null = null;
     for (const stage of PIPELINE_STAGES) {
@@ -1266,11 +1429,18 @@ export function CreateModelsPanel({
   }, [availableViewsProviderModels, viewsApiModel]);
 
   useEffect(() => {
-    if (!isZero123ppViews) return;
-    if (viewsCount !== 6) {
-      setViewsCount(6);
+    if (!hasFixedViewsCount) return;
+    if (viewsCount !== fixedViewsCount) {
+      setViewsCount(fixedViewsCount ?? viewsCount);
     }
-  }, [isZero123ppViews, viewsCount]);
+  }, [hasFixedViewsCount, fixedViewsCount, viewsCount]);
+
+  useEffect(() => {
+    if (!isGeminiViews || !viewsCountAuto) return;
+    if (viewsCount !== 4) {
+      setViewsCount(4);
+    }
+  }, [isGeminiViews, viewsCount, viewsCountAuto]);
 
   useEffect(() => {
     const override = viewsApiModelOverride.trim();
@@ -1401,7 +1571,7 @@ export function CreateModelsPanel({
 
     if (!artifactsLoadedRef.current.cutout) {
       try {
-        const res = await fetch(getArtifactUrl("cutout.png"), {
+        const res = await fetchWithAuth(getArtifactUrl("cutout.png"), {
           cache: "no-store",
         });
         if (res.ok) {
@@ -1421,7 +1591,7 @@ export function CreateModelsPanel({
 
     if (!artifactsLoadedRef.current.views) {
       try {
-        const res = await fetch(getArtifactUrl("views.json"), {
+        const res = await fetchWithAuth(getArtifactUrl("views.json"), {
           cache: "no-store",
         });
         if (res.ok) {
@@ -1443,7 +1613,7 @@ export function CreateModelsPanel({
 
     if (!artifactsLoadedRef.current.depth) {
       try {
-        const res = await fetch(getArtifactUrl("depth.json"), {
+        const res = await fetchWithAuth(getArtifactUrl("depth.json"), {
           cache: "no-store",
         });
         if (res.ok) {
@@ -1454,16 +1624,21 @@ export function CreateModelsPanel({
           ) {
             const raw = await res.text();
             const manifest = safeParseJson(raw);
-            if (
-              manifest &&
-              Array.isArray(manifest.views) &&
-              manifest.views.some((view: ViewManifestEntry) =>
-                Boolean(view.depth_path)
-              )
-            ) {
-              setDepthManifest(manifest as ViewManifest);
-              artifactsLoadedRef.current.depth = true;
-              return;
+            if (manifest && Array.isArray(manifest.views)) {
+              if (manifest.skipped) {
+                setDepthManifest(manifest as ViewManifest);
+                artifactsLoadedRef.current.depth = true;
+                return;
+              }
+              if (
+                manifest.views.some((view: ViewManifestEntry) =>
+                  Boolean(view.depth_path)
+                )
+              ) {
+                setDepthManifest(manifest as ViewManifest);
+                artifactsLoadedRef.current.depth = true;
+                return;
+              }
             }
           }
           const blob = await res.blob();
@@ -1482,19 +1657,19 @@ export function CreateModelsPanel({
 
     if (!artifactsLoadedRef.current.points) {
       try {
-        const res = await fetch(getArtifactUrl("points.ply"), {
+        const res = await fetchWithAuth(getArtifactUrl("points.ply"), {
           method: "HEAD",
           cache: "no-store",
         });
         if (res.ok) {
-          setPointsUrl(getArtifactUrl("points.ply"));
+          setPointsUrl(res.url || getArtifactUrl("points.ply"));
           artifactsLoadedRef.current.points = true;
         }
       } catch {
         // ignore
       }
     }
-  }, [artifactBase, getArtifactUrl]);
+  }, [artifactBase, getArtifactUrl, fetchWithAuth]);
 
   const scheduleArtifactRefresh = useCallback(() => {
     if (!artifactBase) return;
@@ -1513,7 +1688,7 @@ export function CreateModelsPanel({
       for (const item of depthItems) {
         if (!item.depthUrl || depthMapsRef.current[item.id]) continue;
         try {
-          const res = await fetch(item.depthUrl, { cache: "no-store" });
+          const res = await fetchWithAuth(item.depthUrl, { cache: "no-store" });
           if (!res.ok) continue;
           const contentType = res.headers.get("content-type") ?? "";
           if (
@@ -1548,7 +1723,35 @@ export function CreateModelsPanel({
     return () => {
       cancelled = true;
     };
-  }, [depthItems]);
+  }, [depthItems, fetchWithAuth]);
+
+  useEffect(() => {
+    if (viewItems.length === 0) return;
+    let cancelled = false;
+
+    const loadViews = async () => {
+      for (const view of viewItems) {
+        if (!view.url || viewImagesRef.current[view.id]) continue;
+        try {
+          const res = await fetchWithAuth(view.url, { cache: "no-store" });
+          if (!res.ok) continue;
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          viewImageUrlsRef.current.push(url);
+          if (!cancelled) {
+            setViewImages((prev) => ({ ...prev, [view.id]: url }));
+          }
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    loadViews();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewItems, fetchWithAuth]);
 
   const applyApiSelection = (
     value: string,
@@ -1743,14 +1946,28 @@ export function CreateModelsPanel({
       }
     };
 
-    const handleDone = async () => {
+    const resolveJobResultUrl = async (job?: JobStatusResponse) => {
+      const url = job?.resultUrl || job?.output?.glb?.url;
+      if (url) return url;
+      try {
+        const latest = await client.getJob(jobId);
+        return latest.resultUrl || latest.output?.glb?.url || null;
+      } catch (err: any) {
+        setError(String(err?.message || err));
+        return null;
+      }
+    };
+
+    const handleDone = async (job?: JobStatusResponse) => {
       if (done) return;
       done = true;
       setStatus("done");
       setProgress(1);
       await refreshArtifacts();
-      const url = client.getResultUrl(jobId);
-      await viewerRef.current?.load(url, { renderMode });
+      const url = await resolveJobResultUrl(job);
+      if (url) {
+        await viewerRef.current?.load(url, { renderMode });
+      }
     };
 
     const handleFailed = (message?: string) => {
@@ -1766,7 +1983,7 @@ export function CreateModelsPanel({
         setStatus(j.status);
         setProgress(j.progress);
         if (j.status === "done") {
-          await handleDone();
+          await handleDone(j);
           return;
         }
         if (j.status === "error") {
@@ -1841,7 +2058,7 @@ export function CreateModelsPanel({
 
     handleJobPoll();
 
-    if (typeof EventSource !== "undefined") {
+    if (!AUTH_REQUIRED && typeof EventSource !== "undefined") {
       const url = `${API_BASE_URL}/v1/jobs/${jobId}/events`;
       eventSource = new EventSource(url);
       eventSource.onopen = () => {
@@ -1892,7 +2109,7 @@ export function CreateModelsPanel({
           points_enabled: pointsEnabled,
         },
       };
-      const res = await fetch(`${API_BASE_URL}/v1/jobs/${jobId}/recon`, {
+      const res = await fetchWithAuth(`${API_BASE_URL}/v1/jobs/${jobId}/recon`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -1905,8 +2122,11 @@ export function CreateModelsPanel({
       pointsLoadedRef.current = null;
       setPointsUrl(null);
       await refreshArtifacts();
-      const url = client.getResultUrl(jobId);
-      await viewerRef.current?.load(url, { renderMode });
+      const job = await client.getJob(jobId);
+      const url = job.resultUrl || job.output?.glb?.url;
+      if (url) {
+        await viewerRef.current?.load(url, { renderMode });
+      }
       setRebuildProgress(1);
     } catch (err: any) {
       setRebuildError(String(err?.message || err));
@@ -1921,6 +2141,7 @@ export function CreateModelsPanel({
     reconMethod,
     viewsCount,
     pointsEnabled,
+    fetchWithAuth,
     refreshArtifacts,
     renderMode,
   ]);
@@ -1940,6 +2161,20 @@ export function CreateModelsPanel({
         <Status>
           {modelFile ? `Selected: ${modelFile.name}` : "No image selected"}
         </Status>
+
+        <Group>
+          <GroupTitle>Upload preview</GroupTitle>
+          {uploadPreview ? (
+            <div className="hudArtifactFrame">
+              <img
+                src={uploadPreview}
+                alt={modelFile ? `Upload preview: ${modelFile.name}` : "Upload"}
+              />
+            </div>
+          ) : (
+            <Status>Select an image to see a preview.</Status>
+          )}
+        </Group>
 
         <Group>
           <GroupTitle>Load existing job</GroupTitle>
@@ -1990,7 +2225,11 @@ export function CreateModelsPanel({
         <Group>
           <GroupTitle>Pipeline models</GroupTitle>
           <div className="hudPipelineGrid">
-            <div className="hudPipelineStage">
+            <div
+              className="hudPipelineStage"
+              data-disabled={cutoutStageDisabled ? "true" : "false"}
+              aria-disabled={cutoutStageDisabled}
+            >
               <div className="hudPipelineHeader">
                 <div>
                   <div className="hudPipelineTitle">Cutout</div>
@@ -1998,32 +2237,46 @@ export function CreateModelsPanel({
                     {cutoutSource === "local" ? "Catalog model" : "API model"}
                   </div>
                 </div>
-                <div
-                  className="hudSourceToggle"
-                  role="radiogroup"
-                  aria-label="Cutout source"
-                >
-                  <button
-                    type="button"
-                    className="hudSourceButton"
-                    data-active={cutoutSource === "local"}
-                    aria-pressed={cutoutSource === "local"}
-                    onClick={() => setCutoutSource("local")}
+                <div className="hudPipelineHeaderActions">
+                  {cutoutStageDisabled && (
+                    <Badge className="hudStageBadge">Skipped</Badge>
+                  )}
+                  <div
+                    className="hudSourceToggle"
+                    role="radiogroup"
+                    aria-label="Cutout source"
                   >
-                    Local
-                  </button>
-                  <button
-                    type="button"
-                    className="hudSourceButton"
-                    data-active={cutoutSource === "api"}
-                    aria-pressed={cutoutSource === "api"}
-                    onClick={() => setCutoutSource("api")}
-                    disabled={availableImageProviderOptions.length === 0}
-                  >
-                    API
-                  </button>
+                    <button
+                      type="button"
+                      className="hudSourceButton"
+                      data-active={cutoutSource === "local"}
+                      aria-pressed={cutoutSource === "local"}
+                      onClick={() => setCutoutSource("local")}
+                      disabled={cutoutStageDisabled}
+                    >
+                      Local
+                    </button>
+                    <button
+                      type="button"
+                      className="hudSourceButton"
+                      data-active={cutoutSource === "api"}
+                      aria-pressed={cutoutSource === "api"}
+                      onClick={() => setCutoutSource("api")}
+                      disabled={
+                        cutoutStageDisabled ||
+                        availableImageProviderOptions.length === 0
+                      }
+                    >
+                      API
+                    </button>
+                  </div>
                 </div>
               </div>
+              {cutoutStageDisabled && (
+                <Hint>
+                  Background removal is handled by the selected views model.
+                </Hint>
+              )}
               <Label>
                 Model
                 <Select
@@ -2046,9 +2299,10 @@ export function CreateModelsPanel({
                     }
                   }}
                   disabled={
-                    cutoutSource === "local"
+                    cutoutStageDisabled ||
+                    (cutoutSource === "local"
                       ? cutoutOptions.length === 0
-                      : cutoutApiModelGroups.length === 0
+                      : cutoutApiModelGroups.length === 0)
                   }
                 >
                   {cutoutSource === "local" ? (
@@ -2094,7 +2348,7 @@ export function CreateModelsPanel({
                   placeholder="space:owner/name or endpoint:https://..."
                   value={cutoutApiModelOverride}
                   onChange={(e) => setCutoutApiModelOverride(e.target.value)}
-                  disabled={cutoutSource !== "api"}
+                  disabled={cutoutStageDisabled || cutoutSource !== "api"}
                 />
               </Label>
               <Label>
@@ -2103,6 +2357,7 @@ export function CreateModelsPanel({
                   rows={2}
                   value={cutoutPrompt}
                   onChange={(e) => setCutoutPrompt(e.target.value)}
+                  disabled={cutoutStageDisabled}
                 />
               </Label>
               <Label>
@@ -2111,13 +2366,17 @@ export function CreateModelsPanel({
                   placeholder="1024x1024"
                   value={cutoutSize}
                   onChange={(e) => setCutoutSize(e.target.value)}
+                  disabled={cutoutStageDisabled}
                 />
               </Label>
               <ModelInputsEditor
                 inputs={selectedCutoutModel?.inputs}
                 parametersRaw={cutoutParametersRaw}
                 setParametersRaw={setCutoutParametersRaw}
-                disabled={cutoutSource === "api" && !cutoutProviderValue}
+                disabled={
+                  cutoutStageDisabled ||
+                  (cutoutSource === "api" && !cutoutProviderValue)
+                }
               />
               <Label>
                 Parameters (JSON)
@@ -2126,11 +2385,16 @@ export function CreateModelsPanel({
                   value={cutoutParametersRaw}
                   onChange={(e) => setCutoutParametersRaw(e.target.value)}
                   placeholder='{"mask_threshold": 0.5}'
+                  disabled={cutoutStageDisabled}
                 />
               </Label>
             </div>
 
-            <div className="hudPipelineStage">
+            <div
+              className="hudPipelineStage"
+              data-disabled={viewsStageDisabled ? "true" : "false"}
+              aria-disabled={viewsStageDisabled}
+            >
               <div className="hudPipelineHeader">
                 <div>
                   <div className="hudPipelineTitle">Views</div>
@@ -2138,32 +2402,44 @@ export function CreateModelsPanel({
                     {viewsSource === "local" ? "Catalog model" : "API model"}
                   </div>
                 </div>
-                <div
-                  className="hudSourceToggle"
-                  role="radiogroup"
-                  aria-label="View source"
-                >
-                  <button
-                    type="button"
-                    className="hudSourceButton"
-                    data-active={viewsSource === "local"}
-                    aria-pressed={viewsSource === "local"}
-                    onClick={() => setViewsSource("local")}
+                <div className="hudPipelineHeaderActions">
+                  {viewsStageDisabled && (
+                    <Badge className="hudStageBadge">Skipped</Badge>
+                  )}
+                  <div
+                    className="hudSourceToggle"
+                    role="radiogroup"
+                    aria-label="View source"
                   >
-                    Local
-                  </button>
-                  <button
-                    type="button"
-                    className="hudSourceButton"
-                    data-active={viewsSource === "api"}
-                    aria-pressed={viewsSource === "api"}
-                    onClick={() => setViewsSource("api")}
-                    disabled={availableImageProviderOptions.length === 0}
-                  >
-                    API
-                  </button>
+                    <button
+                      type="button"
+                      className="hudSourceButton"
+                      data-active={viewsSource === "local"}
+                      aria-pressed={viewsSource === "local"}
+                      onClick={() => setViewsSource("local")}
+                      disabled={viewsStageDisabled}
+                    >
+                      Local
+                    </button>
+                    <button
+                      type="button"
+                      className="hudSourceButton"
+                      data-active={viewsSource === "api"}
+                      aria-pressed={viewsSource === "api"}
+                      onClick={() => setViewsSource("api")}
+                      disabled={
+                        viewsStageDisabled ||
+                        availableImageProviderOptions.length === 0
+                      }
+                    >
+                      API
+                    </button>
+                  </div>
                 </div>
               </div>
+              {viewsStageDisabled && (
+                <Hint>View synthesis is skipped for single-view recon.</Hint>
+              )}
               <Label>
                 Model
                 <Select
@@ -2184,9 +2460,10 @@ export function CreateModelsPanel({
                     }
                   }}
                   disabled={
-                    viewsSource === "local"
+                    viewsStageDisabled ||
+                    (viewsSource === "local"
                       ? viewsOptions.length === 0
-                      : viewsApiModelGroups.length === 0
+                      : viewsApiModelGroups.length === 0)
                   }
                 >
                   {viewsSource === "local" ? (
@@ -2232,7 +2509,7 @@ export function CreateModelsPanel({
                   placeholder="space:owner/name or endpoint:https://..."
                   value={viewsApiModelOverride}
                   onChange={(e) => setViewsApiModelOverride(e.target.value)}
-                  disabled={viewsSource !== "api"}
+                  disabled={viewsStageDisabled || viewsSource !== "api"}
                 />
               </Label>
               <Label>
@@ -2241,13 +2518,17 @@ export function CreateModelsPanel({
                   rows={2}
                   value={viewsPrompt}
                   onChange={(e) => setViewsPrompt(e.target.value)}
+                  disabled={viewsStageDisabled}
                 />
               </Label>
               <ModelInputsEditor
                 inputs={selectedViewsModel?.inputs}
                 parametersRaw={viewsParametersRaw}
                 setParametersRaw={setViewsParametersRaw}
-                disabled={viewsSource === "api" && !viewsProviderValue}
+                disabled={
+                  viewsStageDisabled ||
+                  (viewsSource === "api" && !viewsProviderValue)
+                }
               />
               <Label>
                 Parameters (JSON)
@@ -2256,10 +2537,15 @@ export function CreateModelsPanel({
                   value={viewsParametersRaw}
                   onChange={(e) => setViewsParametersRaw(e.target.value)}
                   placeholder='{"__hf_api_name": "/predict", "__hf_inputs": ["{image}", "{prompt}", "{az_deg}", "{elev_deg}"]}'
+                  disabled={viewsStageDisabled}
                 />
               </Label>
-              {isZero123ppViews ? (
-                <Label className="hudSlider">View count: 6</Label>
+              {viewsStageDisabled ? (
+                <Label className="hudSlider">View count: 1</Label>
+              ) : hasFixedViewsCount ? (
+                <Label className="hudSlider">
+                  View count: {fixedViewsCount}
+                </Label>
               ) : (
                 <Label className="hudSlider">
                   View count: {viewsCount}
@@ -2268,13 +2554,27 @@ export function CreateModelsPanel({
                     max={12}
                     step={1}
                     value={viewsCount}
-                    onChange={(e) => setViewsCount(Number(e.target.value))}
+                    onChange={(e) => {
+                      setViewsCount(Number(e.target.value));
+                      setViewsCountAuto(false);
+                    }}
+                    disabled={viewsStageDisabled}
                   />
                 </Label>
               )}
+              {reconSingleViewEnabled && !viewsStageDisabled && (
+                <Hint>
+                  Single-view upload only affects mesh generation; view synthesis
+                  still runs.
+                </Hint>
+              )}
             </div>
 
-            <div className="hudPipelineStage">
+            <div
+              className="hudPipelineStage"
+              data-disabled={depthStageDisabled ? "true" : "false"}
+              aria-disabled={depthStageDisabled}
+            >
               <div className="hudPipelineHeader">
                 <div>
                   <div className="hudPipelineTitle">Depth</div>
@@ -2282,32 +2582,44 @@ export function CreateModelsPanel({
                     {depthSource === "local" ? "Catalog model" : "API model"}
                   </div>
                 </div>
-                <div
-                  className="hudSourceToggle"
-                  role="radiogroup"
-                  aria-label="Depth source"
-                >
-                  <button
-                    type="button"
-                    className="hudSourceButton"
-                    data-active={depthSource === "local"}
-                    aria-pressed={depthSource === "local"}
-                    onClick={() => setDepthSource("local")}
+                <div className="hudPipelineHeaderActions">
+                  {depthStageDisabled && (
+                    <Badge className="hudStageBadge">Skipped</Badge>
+                  )}
+                  <div
+                    className="hudSourceToggle"
+                    role="radiogroup"
+                    aria-label="Depth source"
                   >
-                    Local
-                  </button>
-                  <button
-                    type="button"
-                    className="hudSourceButton"
-                    data-active={depthSource === "api"}
-                    aria-pressed={depthSource === "api"}
-                    onClick={() => setDepthSource("api")}
-                    disabled={availableImageProviderOptions.length === 0}
-                  >
-                    API
-                  </button>
+                    <button
+                      type="button"
+                      className="hudSourceButton"
+                      data-active={depthSource === "local"}
+                      aria-pressed={depthSource === "local"}
+                      onClick={() => setDepthSource("local")}
+                      disabled={depthStageDisabled}
+                    >
+                      Local
+                    </button>
+                    <button
+                      type="button"
+                      className="hudSourceButton"
+                      data-active={depthSource === "api"}
+                      aria-pressed={depthSource === "api"}
+                      onClick={() => setDepthSource("api")}
+                      disabled={
+                        depthStageDisabled ||
+                        availableImageProviderOptions.length === 0
+                      }
+                    >
+                      API
+                    </button>
+                  </div>
                 </div>
               </div>
+              {depthStageDisabled && (
+                <Hint>Depth maps are not needed for the selected recon model.</Hint>
+              )}
               <Label>
                 Model
                 <Select
@@ -2330,9 +2642,10 @@ export function CreateModelsPanel({
                     }
                   }}
                   disabled={
-                    depthSource === "local"
+                    depthStageDisabled ||
+                    (depthSource === "local"
                       ? depthOptions.length === 0
-                      : depthApiModelGroups.length === 0
+                      : depthApiModelGroups.length === 0)
                   }
                 >
                   {depthSource === "local" ? (
@@ -2378,7 +2691,7 @@ export function CreateModelsPanel({
                   placeholder="space:owner/name or endpoint:https://..."
                   value={depthApiModelOverride}
                   onChange={(e) => setDepthApiModelOverride(e.target.value)}
-                  disabled={depthSource !== "api"}
+                  disabled={depthStageDisabled || depthSource !== "api"}
                 />
               </Label>
               <Label>
@@ -2387,6 +2700,7 @@ export function CreateModelsPanel({
                   rows={2}
                   value={depthPrompt}
                   onChange={(e) => setDepthPrompt(e.target.value)}
+                  disabled={depthStageDisabled}
                 />
               </Label>
               <Label>
@@ -2395,13 +2709,17 @@ export function CreateModelsPanel({
                   placeholder="1024x1024"
                   value={depthSize}
                   onChange={(e) => setDepthSize(e.target.value)}
+                  disabled={depthStageDisabled}
                 />
               </Label>
               <ModelInputsEditor
                 inputs={selectedDepthModel?.inputs}
                 parametersRaw={depthParametersRaw}
                 setParametersRaw={setDepthParametersRaw}
-                disabled={depthSource === "api" && !depthProviderValue}
+                disabled={
+                  depthStageDisabled ||
+                  (depthSource === "api" && !depthProviderValue)
+                }
               />
               <Label>
                 Parameters (JSON)
@@ -2410,6 +2728,7 @@ export function CreateModelsPanel({
                   value={depthParametersRaw}
                   onChange={(e) => setDepthParametersRaw(e.target.value)}
                   placeholder='{"prediction_mode": "absolute"}'
+                  disabled={depthStageDisabled}
                 />
               </Label>
               <Label className="ui-toggle">
@@ -2419,7 +2738,7 @@ export function CreateModelsPanel({
                     setDepthInvert(e.target.checked);
                     setDepthInvertAuto(false);
                   }}
-                  disabled={depthSource !== "local"}
+                  disabled={depthStageDisabled || depthSource !== "local"}
                 />
                 Invert depth (Depth Anything)
               </Label>
@@ -2440,30 +2759,32 @@ export function CreateModelsPanel({
                       : "API model"}
                   </div>
                 </div>
-                <div
-                  className="hudSourceToggle"
-                  role="radiogroup"
-                  aria-label="Mesh source"
-                >
-                  <button
-                    type="button"
-                    className="hudSourceButton"
-                    data-active={reconSource === "local"}
-                    aria-pressed={reconSource === "local"}
-                    onClick={() => setReconSource("local")}
+                <div className="hudPipelineHeaderActions">
+                  <div
+                    className="hudSourceToggle"
+                    role="radiogroup"
+                    aria-label="Mesh source"
                   >
-                    Local
-                  </button>
-                  <button
-                    type="button"
-                    className="hudSourceButton"
-                    data-active={reconSource === "api"}
-                    aria-pressed={reconSource === "api"}
-                    onClick={() => setReconSource("api")}
-                    disabled={availableReconProviderOptions.length === 0}
-                  >
-                    API
-                  </button>
+                    <button
+                      type="button"
+                      className="hudSourceButton"
+                      data-active={reconSource === "local"}
+                      aria-pressed={reconSource === "local"}
+                      onClick={() => setReconSource("local")}
+                    >
+                      Local
+                    </button>
+                    <button
+                      type="button"
+                      className="hudSourceButton"
+                      data-active={reconSource === "api"}
+                      aria-pressed={reconSource === "api"}
+                      onClick={() => setReconSource("api")}
+                      disabled={availableReconProviderOptions.length === 0}
+                    >
+                      API
+                    </button>
+                  </div>
                 </div>
               </div>
               <Label>
@@ -2546,6 +2867,31 @@ export function CreateModelsPanel({
                   disabled={reconSource !== "api"}
                 />
               </Label>
+              {reconSource === "api" && (
+                <>
+                  <Label className="ui-toggle">
+                    <Checkbox
+                      checked={reconSingleViewEnabled}
+                      onChange={(e) =>
+                        upsertParameterValue(
+                          setReconParametersRaw,
+                          "singleView",
+                          e.target.checked ? true : ""
+                        )
+                      }
+                      disabled={!selectedReconModelId}
+                    />
+                    Single-view upload
+                  </Label>
+                  {selectedReconModelId && !reconSingleViewSupported && (
+                    <Hint>
+                      This model appears multi-view only. Single-view requests
+                      will be ignored unless you set `singleViewForce` in the
+                      parameters JSON.
+                    </Hint>
+                  )}
+                </>
+              )}
               <ModelInputsEditor
                 inputs={selectedReconModel?.inputs}
                 parametersRaw={reconParametersRaw}
@@ -2747,7 +3093,7 @@ export function CreateModelsPanel({
           {jobId && (
             <div className="hudProgressJobId">
               <span>Job:</span>
-              <code>{jobId.slice(0, 12)}...</code>
+              <code>{jobId}</code>
             </div>
           )}
 
@@ -2797,16 +3143,22 @@ export function CreateModelsPanel({
 
         <Group>
           <GroupTitle>Views</GroupTitle>
-          {viewItems.length > 0 ? (
+          {viewsSkipped ? (
+            <Status>Views skipped for single-view recon.</Status>
+          ) : viewItems.length > 0 ? (
             <div className="hudArtifactGrid">
               {viewItems.map((view) => (
                 <div className="hudArtifactCard" key={view.id}>
-                  <img
-                    className="hudArtifactThumb"
-                    src={view.url}
-                    alt={`View ${view.label}`}
-                    loading="lazy"
-                  />
+                  {viewImages[view.id] ? (
+                    <img
+                      className="hudArtifactThumb"
+                      src={viewImages[view.id]}
+                      alt={`View ${view.label}`}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="hudArtifactPlaceholder">Loading</div>
+                  )}
                   <span className="hudArtifactLabel">{view.label}</span>
                 </div>
               ))}
@@ -2818,7 +3170,9 @@ export function CreateModelsPanel({
 
         <Group>
           <GroupTitle>Depth</GroupTitle>
-          {depthPreviewImage ? (
+          {depthSkipped ? (
+            <Status>Depth skipped for fal recon.</Status>
+          ) : depthPreviewImage ? (
             <div className="hudArtifactFrame">
               <img src={depthPreviewImage} alt="Depth preview" />
             </div>
