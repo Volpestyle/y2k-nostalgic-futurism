@@ -36,6 +36,7 @@ api = [
   "fastapi>=0.110.0",
   "uvicorn>=0.23.0",
   "python-multipart>=0.0.9",
+  "PyJWT[crypto]>=2.8.0",
 ]
 texture = [
   "pyxatlas>=0.4.0",

@@ -4,12 +4,13 @@ import asyncio
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
@@ -19,6 +20,8 @@ from ai_kit.catalog import load_catalog_models
 from ai_kit.pricing import load_scraped_models
 from ai_kit.types import ModelCapabilities, ModelMetadata, TokenPrices
 
+from ..auth import AuthConfig, AuthVerifier
+from ..admin_settings import get_admin_settings
 from ..aws.s3 import presign_s3_url
 from ..config import AwsConfig, PipelineConfig
 from ..events import PipelineEvent
@@ -26,9 +29,13 @@ from ..jobs.local import LocalJobRunner, LocalJobStore
 from ..jobs.runner_sqs import SqsJobRunner
 from ..jobs.store_dynamodb import JobStoreDynamoDB
 from ..local_recon import LocalReconstructor
+from ..rate_limit import enforce_rate_limit
+from ..runtime_cost import record_runtime_cost, should_throttle_for_budget
+from ..secrets import load_aws_secrets
 
 app = FastAPI(title="img2mesh3d", version="0.2.0")
 logger = logging.getLogger("img2mesh3d.api")
+FAL_ERA3D_MODEL_ID = "fal-ai/era-3d"
 
 
 def _cors_origins() -> list[str]:
@@ -46,6 +53,30 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.method == "OPTIONS" or request.url.path == "/healthz":
+        return await call_next(request)
+    try:
+        auth_verifier.verify_request(request)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def admin_settings_middleware(request: Request, call_next):
+    if request.method == "OPTIONS" or request.url.path == "/healthz":
+        return await call_next(request)
+    settings_response = get_admin_settings()
+    if not settings_response.settings.app_enabled:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Service temporarily disabled"},
+        )
+    return await call_next(request)
+
+
 def _configure_logging() -> None:
     level_name = os.getenv("IMG2MESH3D_LOG_LEVEL", "info").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -55,6 +86,7 @@ def _configure_logging() -> None:
 
 
 _configure_logging()
+load_aws_secrets()
 
 LOCAL_BASE_DIR = Path(os.getenv("IMG2MESH3D_LOCAL_DIR", "local-data/img2mesh3d")).resolve()
 LOCAL_STORE = LocalJobStore(base_dir=LOCAL_BASE_DIR)
@@ -74,6 +106,43 @@ def _use_local_mode() -> bool:
     return not all(os.getenv(name) for name in required)
 
 
+def _auth_required_from_env() -> bool:
+    raw = os.getenv("AUTH_JWT_REQUIRED")
+    if raw is None:
+        return bool(
+            os.getenv("AUTH_JWT_JWKS_URL")
+            or os.getenv("AUTH_JWT_ISSUER")
+            or os.getenv("AUTH_JWT_AUDIENCE")
+        )
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+auth_required = _auth_required_from_env()
+auth_issuer = os.getenv("AUTH_JWT_ISSUER")
+auth_audience = os.getenv("AUTH_JWT_AUDIENCE")
+auth_jwks_url = os.getenv("AUTH_JWT_JWKS_URL")
+auth_app = os.getenv("AUTH_JWT_APP")
+try:
+    auth_leeway_seconds = int(os.getenv("AUTH_JWT_LEEWAY_SECONDS", "30"))
+except ValueError:
+    auth_leeway_seconds = 30
+if auth_required and not (auth_issuer and auth_audience and auth_jwks_url):
+    raise RuntimeError(
+        "AUTH_JWT_ISSUER, AUTH_JWT_AUDIENCE, and AUTH_JWT_JWKS_URL are required when auth is enabled."
+    )
+
+auth_verifier = AuthVerifier(
+    AuthConfig(
+        enabled=auth_required,
+        issuer=auth_issuer,
+        audience=auth_audience,
+        jwks_url=auth_jwks_url,
+        app=auth_app,
+        leeway_seconds=auth_leeway_seconds,
+    )
+)
+
+
 def _get_aws() -> AwsConfig:
     return AwsConfig.from_env()
 
@@ -84,6 +153,39 @@ def _get_store(aws: AwsConfig) -> JobStoreDynamoDB:
 
 def _get_runner(aws: AwsConfig, store: JobStoreDynamoDB) -> SqsJobRunner:
     return SqsJobRunner(aws=aws, store=store)
+
+
+def _estimated_job_cost_usd() -> float:
+    raw = os.getenv("IMG2MESH3D_JOB_COST_USD") or os.getenv("IMG2MESH3D_ESTIMATED_COST_USD")
+    if not raw:
+        return 0.0
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _get_client_ip(request: Request) -> Optional[str]:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        first_forwarded_ip = forwarded_for.split(",")[0].strip()
+        if first_forwarded_ip:
+            return first_forwarded_ip
+    real_ip = request.headers.get("x-real-ip") or request.headers.get("cf-connecting-ip")
+    if real_ip:
+        return real_ip.strip()
+    return None
+
+
+def _get_client_identifier(request: Request) -> Optional[str]:
+    payload = getattr(request.state, "user", {}) or {}
+    email = payload.get("email")
+    if isinstance(email, str) and email.strip():
+        return f"user:{email.strip().lower()}"
+    ip = _get_client_ip(request)
+    if ip:
+        return f"ip:{ip}"
+    return None
 
 
 def _parse_json_dict(raw: Optional[str], *, label: str) -> Optional[Dict[str, Any]]:
@@ -136,6 +238,10 @@ def _bake_spec_to_overrides(spec: Dict[str, Any]) -> Dict[str, Any]:
         overrides["depth_invert"] = bool(depth.get("depthInvert"))
     if isinstance(views, dict) and views.get("model"):
         overrides["multiview_model"] = str(_alias("views", str(views["model"])))
+    if isinstance(views, dict) and views.get("provider"):
+        overrides["multiview_provider"] = str(views["provider"])
+    if isinstance(views, dict) and views.get("prompt"):
+        overrides["multiview_prompt"] = str(views["prompt"])
     if isinstance(views, dict) and isinstance(views.get("parameters"), dict):
         overrides["multiview_params"] = views["parameters"]
     if isinstance(views, dict) and isinstance(views.get("count"), (int, float)):
@@ -196,6 +302,12 @@ def _build_views_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
     views = []
     steps = manifest.get("steps") or {}
     mv = steps.get("multiview") or {}
+    if mv.get("skipped"):
+        payload = {"version": 1, "views": [], "skipped": True}
+        reason = mv.get("reason")
+        if reason:
+            payload["reason"] = reason
+        return payload
     view_paths = mv.get("views") or []
     for idx, path in enumerate(view_paths):
         views.append({"id": f"view_{idx:03d}", "image_path": path})
@@ -205,6 +317,12 @@ def _build_views_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
 def _build_depth_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
     steps = manifest.get("steps") or {}
     depth = steps.get("depth") or {}
+    if depth.get("skipped"):
+        payload = {"version": 1, "views": [], "skipped": True}
+        reason = depth.get("reason")
+        if reason:
+            payload["reason"] = reason
+        return payload
     maps = depth.get("maps") or []
     by_index: Dict[int, Dict[str, str]] = {}
     for item in maps:
@@ -365,7 +483,7 @@ def _model_available(provider: str) -> bool:
     key_env = {
         "openai": ("AI_KIT_OPENAI_API_KEY", "OPENAI_API_KEY"),
         "anthropic": ("AI_KIT_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
-        "google": ("AI_KIT_GOOGLE_API_KEY", "GOOGLE_API_KEY"),
+        "google": ("AI_KIT_GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "xai": ("AI_KIT_XAI_API_KEY", "XAI_API_KEY"),
         "replicate": ("AI_KIT_REPLICATE_API_KEY", "REPLICATE_API_TOKEN"),
         "fal": ("AI_KIT_FAL_API_KEY", "FAL_API_KEY", "FAL_KEY"),
@@ -449,9 +567,49 @@ def _ensure_catalog_cutout(models: list[ModelMetadata]) -> list[ModelMetadata]:
     return updated
 
 
+def _ensure_fal_views(models: list[ModelMetadata]) -> list[ModelMetadata]:
+    updated: list[ModelMetadata] = []
+    found = False
+    for model in models:
+        if isinstance(model, ModelMetadata) and model.provider == "fal" and model.id == FAL_ERA3D_MODEL_ID:
+            found = True
+            caps = model.capabilities
+            if model.family != "views" or not (caps and caps.image):
+                updated_caps = ModelCapabilities(
+                    text=bool(getattr(caps, "text", False)),
+                    vision=bool(getattr(caps, "vision", False)),
+                    image=True,
+                    tool_use=bool(getattr(caps, "tool_use", False)),
+                    structured_output=bool(getattr(caps, "structured_output", False)),
+                    reasoning=bool(getattr(caps, "reasoning", False)),
+                )
+                model = replace(model, family="views", capabilities=updated_caps)
+        updated.append(model)
+    if not found:
+        updated.append(
+            ModelMetadata(
+                id=FAL_ERA3D_MODEL_ID,
+                displayName="Era 3D",
+                provider="fal",
+                family="views",
+                capabilities=ModelCapabilities(
+                    text=False,
+                    vision=True,
+                    image=True,
+                    tool_use=False,
+                    structured_output=False,
+                    reasoning=False,
+                ),
+            )
+        )
+    return updated
+
+
 @app.get("/v1/ai/provider-models")
 def list_provider_models(providers: Optional[str] = None) -> list[Dict[str, Any]]:
-    models = _ensure_catalog_cutout(load_catalog_models()) + _load_scraped_model_metadata()
+    models = _ensure_fal_views(
+        _ensure_catalog_cutout(load_catalog_models()) + _load_scraped_model_metadata()
+    )
     selected = None
     if providers:
         selected = {p.strip() for p in providers.split(",") if p.strip()}
@@ -476,6 +634,7 @@ def healthz() -> Dict[str, str]:
 
 @app.post("/v1/jobs")
 async def create_job(
+    request: Request,
     file: Optional[UploadFile] = File(None),
     image: Optional[UploadFile] = File(None),
     bakeSpec: Optional[str] = Form(None),
@@ -492,6 +651,26 @@ async def create_job(
     if upload is None:
         raise HTTPException(status_code=400, detail="Missing upload")
 
+    identifier = _get_client_identifier(request)
+    if identifier:
+        limit_result = await asyncio.to_thread(enforce_rate_limit, identifier)
+        if not limit_result.success:
+            retry_after = max(1, limit_result.reset - int(time.time()))
+            return JSONResponse(
+                status_code=429,
+                content={"detail": limit_result.reason or "Rate limit exceeded"},
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    settings_response = get_admin_settings()
+    budget_usd = settings_response.settings.monthly_cost_limit_usd
+    if isinstance(budget_usd, (int, float)) and budget_usd > 0:
+        cost_state = should_throttle_for_budget(budget_usd=budget_usd)
+        if cost_state and cost_state.level == "exceeded":
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Monthly budget exceeded"},
+            )
     raw = await upload.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty upload")
@@ -526,6 +705,9 @@ async def create_job(
             sorted(overrides.keys()),
         )
         logger.debug("create_job overrides=%s", overrides)
+        await asyncio.to_thread(
+            record_runtime_cost, _estimated_job_cost_usd(), budget_usd=budget_usd
+        )
         return {"job_id": job_id}
 
     aws = _get_aws()
@@ -543,6 +725,9 @@ async def create_job(
         sorted(overrides.keys()),
     )
     logger.debug("create_job overrides=%s", overrides)
+    await asyncio.to_thread(
+        record_runtime_cost, _estimated_job_cost_usd(), budget_usd=budget_usd
+    )
     return {"job_id": job_id}
 
 

@@ -11,6 +11,7 @@ import boto3
 from .config import AwsConfig
 from .jobs.store_dynamodb import JobStoreDynamoDB
 from .jobs.worker import process_job_payload
+from .secrets import load_aws_secrets
 
 
 def main() -> None:
@@ -20,6 +21,7 @@ def main() -> None:
     parser.add_argument("--visibility-timeout", type=int, default=900, help="SQS visibility timeout (seconds)")
     args = parser.parse_args()
 
+    load_aws_secrets()
     aws = AwsConfig.from_env()
     store = JobStoreDynamoDB(table_name=aws.ddb_table, region=aws.region)
     sqs = boto3.client("sqs", region_name=aws.region)

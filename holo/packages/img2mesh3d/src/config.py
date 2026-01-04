@@ -19,6 +19,8 @@ class PipelineConfig(BaseModel):
     multiview_model: str = Field(
         default="jd7h/zero123plusplus:c69c6559a29011b576f1ff0371b3bc1add2856480c60520c7e9ce0b40a6e9052"
     )
+    multiview_provider: Optional[str] = Field(default=None)
+    multiview_prompt: Optional[str] = Field(default=None)
     depth_model: str = Field(
         default="chenxwh/depth-anything-v2:b239ea33cff32bb7abb5db39ffe9a09c14cbc2894331d1ef66fe096eed88ebd4"
     )
@@ -105,6 +107,8 @@ class PipelineConfig(BaseModel):
         Supported env vars (optional):
           - IMG2MESH3D_REMOVE_BG_MODEL
           - IMG2MESH3D_MULTIVIEW_MODEL
+          - IMG2MESH3D_MULTIVIEW_PROVIDER
+          - IMG2MESH3D_MULTIVIEW_PROMPT
           - IMG2MESH3D_DEPTH_MODEL
           - IMG2MESH3D_RECON_PROVIDER
           - IMG2MESH3D_RECON_MODEL
@@ -133,6 +137,10 @@ class PipelineConfig(BaseModel):
             data["remove_bg_model"] = os.getenv("IMG2MESH3D_REMOVE_BG_MODEL")
         if os.getenv("IMG2MESH3D_MULTIVIEW_MODEL"):
             data["multiview_model"] = os.getenv("IMG2MESH3D_MULTIVIEW_MODEL")
+        if os.getenv("IMG2MESH3D_MULTIVIEW_PROVIDER"):
+            data["multiview_provider"] = os.getenv("IMG2MESH3D_MULTIVIEW_PROVIDER")
+        if os.getenv("IMG2MESH3D_MULTIVIEW_PROMPT"):
+            data["multiview_prompt"] = os.getenv("IMG2MESH3D_MULTIVIEW_PROMPT")
         if os.getenv("IMG2MESH3D_DEPTH_MODEL"):
             data["depth_model"] = os.getenv("IMG2MESH3D_DEPTH_MODEL")
         if os.getenv("IMG2MESH3D_RECON_PROVIDER"):
