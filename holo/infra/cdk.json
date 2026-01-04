@@ -1,0 +1,6 @@
+{
+  "app": "npx tsx bin/y2k-lounge.ts",
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeVersionProps": true
+  }
+}

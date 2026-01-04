@@ -1,0 +1,17 @@
+{
+  "name": "y2k-lounge-infra",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -w -p tsconfig.json",
+    "cdk": "cdk",
+    "deploy": "cdk deploy"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.146.0",
+    "aws-cdk-lib": "^2.146.0",
+    "constructs": "^10.3.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4"
+  }
+}
